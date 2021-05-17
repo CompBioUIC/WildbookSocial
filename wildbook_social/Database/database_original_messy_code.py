@@ -22,6 +22,7 @@ from geopy.geocoders import Nominatim
 from geopy import distance
 import plotly.express as px
 import plotly.graph_objects as go
+import seaborn as sns
 
 class Database:
     def __init__(self, key, database):
@@ -40,8 +41,13 @@ class Database:
                 self.db[collection].insert_one(payload)
             except:
                 pass # Item already exists in database
+            
     def returnDbCol(self, saveTo):
         return self.db[saveTo]
+    
+    def getDB(self):
+        return self.db
+    
     def getAllItems(self, collection):
         res = self.db[collection].find()
         return [x for x in res]
@@ -53,6 +59,11 @@ class Database:
         except(e):
             print("Error updating item", e)
             return False
+    
+    ## method to rename 'url_l' field in flickr docs to just 'url'
+    def renameField(self, collection, oldName, newName):
+        self.db[collection].update({}, {'$rename' : {oldName : newName}}, upsert=False, multi=True)
+        return
     
     def convertToUTC(self, collection):
         res = self.db[collection].find({"$or":[{"relevant":None}, {"relevant": True}, {"captive": False}]})
@@ -85,7 +96,77 @@ class Database:
             else:
                 anticount = anticount + 1
                 #continue
-                
+    def get_observed_created_times(self, wild_col, observed_tf_start,COVID=False):##, observed_tf_end=False, created_tf_start=False, created_tf_end=False):
+        if COVID:
+            ## sources: https://www.who.int/emergencies/diseases/novel-coronavirus-2019/interactive-timeline#!
+            observed_tf_end= datetime.datetime.now()
+            created_on_tf_start=  dateutil.parser.parse("2020-03-11") #date when WHO declares COVID pandemic
+            res= self.db[wild_col].find({'$and':[{'time_observed_utc': {'$lte': observed_tf_end}}, {'created_on':{'$gte': created_on_tf_start}}]})
+        else:
+            observed_tf_start = dateutil.parser.parse(observed_tf_start)
+            res = self.db[wild_col].find({'time_observed_utc': {'$gte': observed_tf_start}})
+        obs_times =[]
+        created_times =[]
+        for doc in res:
+            obs_times.append(doc['time_observed_utc'])
+            created_times.append(doc['created_on'])
+        return obs_times, created_times
+    
+    def plot_observed_created_delays(self, wild_col, observed_tf_start="2019-06-01 00:00:00", COVID=False):
+        
+        #create df with observed times, and times post was created/uploaded at
+        observed_on_times, created_on_times= self.get_observed_created_times(wild_col,observed_tf_start,COVID)
+        df =pd.DataFrame({"observed_on": observed_on_times,"created_on": created_on_times})
+        #find time delays- keep difference in days only
+        time_delay = df["created_on"] - df["observed_on"]
+        time_delay_days=[]
+        for x in range(0, len(time_delay)):
+            time_delay_days.append(time_delay[x].days)
+        df["time_delay_days"] = time_delay_days
+        
+        #plot date observed vs date uploaded in scatterplot
+        fig, ax = plt.subplots(figsize=(14,14))
+        sns.scatterplot(data=df, x="observed_on", y="created_on", hue="time_delay_days", palette='nipy_spectral', ax=ax)
+        
+        #plot a complementary histogram to visualize COUNTS
+        delays = df['time_delay_days']
+        plt.figure(figsize=(14,14))
+        sns.histplot(data=df, x='time_delay_days')
+#         plt.hist(delays, histtype = 'bar', rwidth = 0.8) #bins= [0,60,120,180,240,300,360,420]
+#         plt.xlabel('Days between observed_on date and created_on date')
+#         plt.ylabel('Number of posts')
+#         plt.title('Histogram for Time Delay Between Encounter and Upload to iNaturalist')
+#         plt.show()
+        return df  
+
+    def removeDuplicatesiNat(self,collection):
+        res = self.db[collection].find()
+        for item in res:
+            print(item['id'])
+            if not item:
+                print('No more items') ##no more items to filter in collection
+                break
+            else:
+                dup = self.db[collection].find({"$and": [{"_id": {"$ne":item["_id"]}}, {"id": item["id"]}]})
+
+                #                 ## some sanity checks
+                #                 print("ITEM")
+                #                 print(item)
+
+                numDuplicates = len(list(dup))
+                print("numDuplicate: ", numDuplicates)
+                if numDuplicates > 0:
+                    print("numDups is > 0.. deleting duplicate docs...")
+                    while(numDuplicates > 0):
+                        pipeline = {"$and": [{"_id": {"$ne":item["_id"]}}, {"id": item["id"]}]}
+                        self.db[collection].remove(pipeline)
+                        numDuplicates -= 1
+                    print("done removing duplicates. Following output should be empty")
+                    dup = self.db[collection].find({"$and": [{"_id": {"$ne":item["_id"]}}, {"id": item["id"]}]})
+                    print(dup)
+                    print(len(list(dup)))
+        print("Finished removing duplicates from collection")
+    
     def doStatistics(self, collection, amount):
         i = 1
         count = 0
@@ -120,7 +201,6 @@ class Database:
                     print(dup)
                     print(len(list(dup)))
                     
-                
             elif self.dbName == 'flickr_june_2019':
                 #get an item that hasn't been manually filtered
                 item = self.db[collection].find_one({'relevant': None})
@@ -237,12 +317,20 @@ class Database:
             lastDate.append(date)
 
         # Plotting the histogram
-        plt.figure(figsize=(15,5))
-        plt.hist(timeDiffs, bins = 10, histtype = 'bar', rwidth = 0.8)
+#         plt.figure(figsize=(15,5))
+#         plt.hist(timeDiffs, bins = 10, histtype = 'bar', rwidth = 0.8)
+#         plt.xlabel('Days between succesive posts')
+#         plt.ylabel('Number of posts')
+#         plt.title('Histogram for Time Between Succesive Wild Posts')
+#         plt.show()
+        
+        #new data visuals with seaborn
+        plt.figure(figsize=(20,20))
+        sns.histplot(data=timeDiffs, bins=10)
         plt.xlabel('Days between succesive posts')
         plt.ylabel('Number of posts')
         plt.title('Histogram for Time Between Succesive Wild Posts')
-        plt.show()
+        
         
       
     #structures a dictionary as such: {week_0: 2, week_1: 15, week_2: 37 ...} from a list of dates
@@ -301,7 +389,7 @@ class Database:
         if len(timePosts) < 1:
             print("No videos were processed yet.")
             return
-        #IMPORTANT: self.dates() is a list of datetime.date() objects of wild encounters within the time frame
+        #IMPORTANT: dates() is a list of datetime.date() objects of wild encounters within the time frame
         #it converts .datetime objs to more general .date objs (easier to work with)
         #and then sorts the converted dates in a list with most recent at beginning and least recent towards end
         if self.dbName == 'youtube' or self.dbName == 'twitter' or self.dbName == 'flickr_june_2019':

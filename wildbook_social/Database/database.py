@@ -1,3 +1,4 @@
+##organized Database Class
 from pymongo import MongoClient
 import pprint
 from IPython.display import YouTubeVideo, Image, display, Video
@@ -7,7 +8,7 @@ import time
 import dateutil.parser
 import matplotlib.pyplot as plt
 import csv
-import pandas as pd
+import pandas as pd 
 import geopandas as gpd
 import descartes
 pd.options.mode.chained_assignment = None  # default='warn'
@@ -16,6 +17,7 @@ import datetime
 from datetime import date
 import numpy as np
 import itertools
+
 from geopy.extra.rate_limiter import RateLimiter
 from geopy.geocoders import Bing
 from geopy.geocoders import Nominatim
@@ -23,14 +25,22 @@ from geopy import distance
 import plotly.express as px
 import plotly.graph_objects as go
 
+import seaborn as sns
+
+
+## class to support database operations done on items in mongoDB
 class Database:
+    
     def __init__(self, key, database):
         self.client = MongoClient(key)
         self.dbName = database
         self.db = self.client[database]
-        self.dateStr = '2019-06-01T00:00:00.00Z' #06.11.20
+        self.dateStr = '2019-06-01T00:00:00.00Z' 
         self.timeFrameStart = dateutil.parser.parse(self.dateStr)
+        self.timeFrameEnd = dateutil.parser.parse('2020-09-01T00:00:00.00Z')
         
+        
+    ## add a new doc to collection
     def addItem(self, payload, collection):
         if self.dbName == 'iNaturalist':
             if self.db[collection].find_one(payload) == None:
@@ -40,12 +50,19 @@ class Database:
                 self.db[collection].insert_one(payload)
             except:
                 pass # Item already exists in database
+    
+    
+    ## return whole db object
+    def getDB(self):
+        return self.db
+    
+    
+    ## return a db collection object
     def returnDbCol(self, saveTo):
         return self.db[saveTo]
-    def getAllItems(self, collection):
-        res = self.db[collection].find()
-        return [x for x in res]
     
+    
+    ## update an existing item's field in collection
     def _updateItem(self, collection, id, payload):
         try:
             self.db[collection].update_one({"_id": id}, {"$set": payload})
@@ -54,202 +71,251 @@ class Database:
             print("Error updating item", e)
             return False
     
+    
+    ## method to rename 'url_l' field in flickr collections to just 'url'
+    def renameField(self, collection, oldName, newName):
+        self.db[collection].update({}, {'$rename' : {oldName : newName}}, upsert=False, multi=True)
+        return
+    
+    
+    ## method to convert the 'time observed' field to UTC format across different platforms' collections
     def convertToUTC(self, collection):
+        
+        #update unsorted and wild documents
         res = self.db[collection].find({"$or":[{"relevant":None}, {"relevant": True}, {"captive": False}]})
-        count = 0
-        anticount = 0
         
         for doc in res:
+            #youtube
             if self.dbName == 'youtube':
                 date_str = doc['publishedAt']
                 field = 'publishedAt'
+            
+            #iNaturalist has two fields regarding times that need to be converted
             if self.dbName == 'iNaturalist':
                 date_str = doc['time_observed_utc']
                 field = 'time_observed_utc'
                 date_str_2 = doc['created_on']
                 field_2 = 'created_on'
+            
+            #flickr
             if self.dbName == 'flickr_june_2019':
-                date_str = doc['datetaken']
-                field = 'datetaken'
+                try:
+                    date_str = doc['datetaken']
+                    field = 'datetaken'
+                except KeyError:
+                    date_str = None
+            
+            #twitter
             if self.dbName == 'twitter':
                 date_str = doc['created_at']
                 field = 'created_at'
-            if type(date_str) == str:
+            
+            #update the corresponding time field with the UTC datetime object (not a string)
+            if type(date_str) == str and date_str != None:
                 doc_id = doc['_id']
                 datetime_obj = dateutil.parser.parse(date_str)
                 self.db[collection].update_one({'_id': doc_id}, {'$set':{ field: datetime_obj}})
+                
+                #for iNaturalist, also update the second time field
                 if self.dbName == "iNaturalist":
                     datetime_obj_2 = dateutil.parser.parse(date_str_2)
                     self.db[collection].update_one({'_id': doc_id}, {'$set':{ field_2: datetime_obj_2}})
-                count = count + 1
+
+   
+    ## method to remove duplicate documents for iNaturalist mongoDB collection of interest
+    def removeDuplicatesiNat(self, collection):
+        
+        res = self.db[collection].find()
+        
+        for item in res:
+            if not item:
+                print('No more items') ##no more items to filter in collection
+                break
+            
             else:
-                anticount = anticount + 1
-                #continue
+                #find all duplicates in current collection
+                dup = self.db[collection].find({"$and": [{"_id": {"$ne":item["_id"]}}, {"id": item["id"]}]})
+
+                numDuplicates = len(list(dup))
+                print("numDuplicate: ", numDuplicates)
                 
-    def doStatistics(self, collection, amount):
+                if numDuplicates > 0:
+                    print("numDups is > 0.. deleting duplicate docs...")
+                    
+                    #delete all existing duplicates from collection
+                    while(numDuplicates > 0):
+                        pipeline = {"$and": [{"_id": {"$ne":item["_id"]}}, {"id": item["id"]}]}
+                        self.db[collection].remove(pipeline)
+                        numDuplicates -= 1
+                    
+        print("Finished removing duplicates from collection")
+    
+    
+    ##method to remove duplicate docs for twitter
+    def removeDuplicatesTwitter(self, item, collection):
+
+        dup = self.db[collection].find({"$and": [{"_id": {"$ne":item["_id"]}}, {"img_url": item["img_url"]}]})   
+        numDuplicates = len(list(dup))
+
+        #duplicate docs in collection exist
+        if numDuplicates > 0:
+            print("numDups is > 0.. deleting duplicate docs...")
+
+            #delete duplicate docs from collection
+            while(numDuplicates > 0):
+                pipeline = {"$and": [{"_id": {"$ne":item["_id"]}}, {"img_url": item["img_url"]}]}
+                self.db[collection].remove(pipeline)
+                numDuplicates -= 1
+    
+    
+    ## removes duplicate docs from flickr collection and returns bool value indicating if duplicates
+    ## were found
+    def removeDuplicatesFlickr(self, item, collection):
+        
+        duplicate_res = self.db[collection].find_one({'$and': [{'id':item['id']}, {'relevant':{"$ne": None}}]})
+        
+        #delete duplicate docs
+        if duplicate_res != None:
+            self.db[collection].remove({'$and': [{'id': item['id']}, {'relevant': None}]})
+            return True
+        
+        return False
+    
+    ## method to manually filter documents in platform collections
+    ## displays image/video to user and asks for relevance and wild/captive classification
+    ## method then proceeds to update 'relevant' and 'wild' fields for doc in mongoDB
+    ## note- iNaturalist does not require manual filtration
+    ## previously named doStatistics()
+    def doManualFiltration(self, collection, amount):
+        
+        #counter variables
         i = 1
         count = 0
+        
+        #keep filtering as long as unsorted docs are in our collection
         while(amount > 0):
+            
             print("Amount: ", amount)
+            
             #only retrieve videos to filter that meet the time frame of June 1st, 2019 and forward
             if self.dbName == 'youtube':
                 item = self.db[collection].find_one({"$and":[{"relevant": None},\
                                                              {"publishedAt":{"$gte": self.timeFrameStart}}]})
-            elif self.dbName == 'twitter':
-                #dont need to check times bc only get posts in last 7 days
-                item = self.db[collection].find_one({"relevant": None}) 
                 if not item:
-                    break ##no more items to filter in collection
-                dup = self.db[collection].find({"$and": [{"_id": {"$ne":item["_id"]}}, {"img_url": item["img_url"]}]})
+                    break
+            
+            #twitter - find an unsorted item and check for duplicates
+            elif self.dbName == 'twitter':
                 
-#                 ## some sanity checks
-#                 print("ITEM")
-#                 print(item)
+                # dont need to check time frame bc API only gets posts in last 7 days
+                item = self.db[collection].find_one({"relevant": None}) 
                 
-                numDuplicates = len(list(dup))
-                print("numDuplicate: ", numDuplicates)
-                if numDuplicates > 0:
-                    print("numDups is > 0.. deleting duplicate docs...")
-                    while(numDuplicates > 0):
-                        pipeline = {"$and": [{"_id": {"$ne":item["_id"]}}, {"img_url": item["img_url"]}]}
-                        self.db[collection].remove(pipeline)
-                        numDuplicates -= 1
-                
-                    print("done removing duplicates. Following output should be empty")
-                    dup = self.db[collection].find({"$and": [{"_id": {"$ne":item["_id"]}}, {"img_url": item["img_url"]}]})
-                    print(dup)
-                    print(len(list(dup)))
+                # no more items to filter in collection
+                if not item:
+                    break 
                     
-                
+                # check if item has duplicates in twitter species collection
+                self.removeDuplicatesTwitter(item, collection)
+                                   
+            #flickr - find an unsorted item and check for duplicates
             elif self.dbName == 'flickr_june_2019':
+                
                 #get an item that hasn't been manually filtered
                 item = self.db[collection].find_one({'relevant': None})
+                
                 #if the item is empty - we ran out of docs
                 if item == None:
                     print("No more items to filter through - exiting..")
                     break
-                #avoid searching through duplicates
-                duplicate_res = self.db[collection].find_one({'$and': [{'id':item['id']}, {'relevant':{"$ne": None}}]})
-                if duplicate_res != None:
-                    print("This item is a duplicate")
-                    self.db[collection].remove({'$and': [{'id': item['id']}, {'relevant': None}]})
+               
+                #remove duplicates if present, and keep searching through docs
+                if self.removeDuplicatesFlickr(item, collection):
                     count += 1
                     amount -= 1
                     i += 1
                     continue
 
-            #manually filter through docs
-            if not item:
-                break
-            if self.dbName=='youtube':
-                print("{}: {}".format(i, item['title']['original']))
-                display(YouTubeVideo(item['_id']))
-            elif self.dbName == 'twitter':
-                url="https://twitter.com/{}/status/{}".format(item['user_handle'], item['_id'])
-                display(EmbedTweet(url))
-            elif self.dbName == 'flickr_june_2019':
-                if item['url_l'] != "":
-                    display(Image(item['url_l'], height=200, width=200))
-                else: 
-                    #to handle images without available url's
-                    rel = False
+            #display image/videos
+            try:
+                if self.dbName=='youtube':
+                    print("{}: {}".format(i, item['title']['original']))
+                    display(YouTubeVideo(item['_id']))
 
-            print("Relevant (y/n):", end =" ")
-            rel = True if input() == "y" else False 
-            #categorize post as wild or captive
-            loc = 0
-            if rel == True:
-                print("Wild (y/n):", end =" ")
-                wild = True if input() == 'y' else False #mark as wild (y) or captive (n)
-                #prompt user with option to enter location only if encounter is wild (YT videos only)
-                if (self.dbName == 'youtube' and wild == True) or (self.dbName == 'twitter' and wild == True):
-                    print("Is there a location? (y/n):", end = " ")
-                    if input() == "y": loc = input()
-            if rel == False: wild = 0  #handle irrelevant posts
+                elif self.dbName == 'twitter':
+                    url="https://twitter.com/{}/status/{}".format(item['user_handle'], item['_id'])
+                    display(EmbedTweet(url))
 
-            #update with new values
-            if self.dbName == 'youtube':
-                self._updateItem(collection, item['_id'], {"relevant": rel, "wild": wild, "newLocation": loc })
-                print("Response saved! Location : {}.\n".format(loc))
-            elif self.dbName == 'twitter':
-                self._updateItem(collection, item['_id'], {"relevant": rel, "wild": wild, "encounter_loc": loc })
-                print("Twitter Response saved! Location : {}.\n".format(loc))
-            else:
-                self._updateItem(collection, item['_id'], {"relevant": rel, "wild": wild})
-                
-            print("Response saved! {} and {}.\n".format("Relevant" if rel else "Not relevant", \
-                                                        "Wild" if wild else "Not wild"))
+                elif self.dbName == 'flickr_june_2019':
+                    # try-except handles some documents having the new, updated name 'url' field rather than
+                    # the 'url_l' (original, older version) 
+                    #to handle images without available url's: 
+                    #delete the item from our collection and move on to next image (continue)
+                    try:
+                        if item['url'] != "":
+                            display(Image(item['url'], height=200, width=200))
+                        else: 
+                            #handle images w/o urls
+                            self.db[collection].remove({'id': item['id']})
+                            continue
+                    except KeyError: 
+                        if item['url_l'] != "":
+                            display(Image(item['url_l'], height=200, width=200))
+                        else: 
+                            #handle images w/o urls
+                            self.db[collection].remove({'id': item['id']})
+                            continue
+                    
+
+                # prompt user for relevance classification
+                print("Relevant (y/n):", end =" ")
+                rel = True if input() == "y" else False 
+
+                # For YouTube, location may be specified in title or in video
+                # 'loc' allows user to input a location of encounter, if available
+                loc = 0 
+
+                # prompt user for wild or captive classification
+                if rel == True:
+                    print("Wild (y/n):", end =" ")
+                    wild = True if input() == 'y' else False 
+
+                    #prompt user with option to enter location only if encounter is wild (YT videos only)
+                    if (self.dbName == 'youtube' and wild == True) or (self.dbName == 'twitter' and wild == True):
+                        print("Is there a location? (y/n):", end = " ")
+                        if input() == "y": loc = input()
+
+                # irrelevant posts don't need to be labeled as wild/captive            
+                if rel == False: wild = 0  
+
+                #update doc (item) with new values
+                if self.dbName == 'youtube':
+                    self._updateItem(collection, item['_id'], {"relevant": rel, "wild": wild, "newLocation": loc })
+                    print("Response saved! Location : {}.\n".format(loc))
+
+                elif self.dbName == 'twitter':
+                    self._updateItem(collection, item['_id'], {"relevant": rel, "wild": wild, "encounter_loc": loc })
+                    print("Twitter Response saved! Location : {}.\n".format(loc))
+
+                else:
+                    self._updateItem(collection, item['_id'], {"relevant": rel, "wild": wild})
+
+                print("Response saved! {} and {}.\n".format("Relevant" if rel else "Not relevant", "Wild" if wild else "Not wild"))
+            
+            except FileNotFoundError:
+                pass
+            
             #update amount of items in collection that need to be filtered
             amount -= 1
             i += 1
-        print('No more items to proceed.')
-        
-    def showStatistics(self, collection):
-        total = self.db[collection].count_documents({ "$and": [{"relevant":{"$in":[True,False]}}]})
-        if total == 0:
-            print("No videos were processed yet.")
-            return
-        #relevant count
-        relevant_count = self.db[collection].count_documents({ "$and": [{"relevant":True}]})
-        print("relevant: {} \n".format(relevant_count))
-        # percent relevant caluclated out of total
-        relevant = self.db[collection].count_documents({ "$and": [{"relevant":True}]}) / total * 100 
-        # percent wild calculated out of ONLY relevant items, this way the remaining percent can be
-        # assumed to be % of zoo sightings
-        try:
-            wild = self.db[collection].count_documents({ "$and": [{"relevant":{"$in":[True]}}, {"wild":True}] }) / relevant_count * 100
-            # percent wild calculated out of total
-            wild_tot = self.db[collection].count_documents({ "$and": [{"relevant":{"$in":[True]}}, {"wild":True}] }) / total * 100
-            print("Out of {} items, {}% are relevant.From those that are relevant, {}% are wild. Out of the total, {}% are wild".format(total, round(relevant,1), round(wild,1), round(wild_tot, 1)))
-            self.showHistogram(collection)
-        except ZeroDivisionError:
-            print("No wild documents in collection so far")
-        
-    def showHistogram(self, collection):
-        #UPDATE: fixed so it only displays delay in time between successive posts in time frame (June 01, 2020)
-        keys = {'youtube': 'publishedAt', 'twitter': 'created_at', 'iNaturalist': 'time_observed_utc', 
-                'flickr_june_2019': 'datetaken'}
-        
-        #gather results for youtube or twitter
-        if self.dbName == 'youtube' or self.dbName == 'twitter' or self.dbName == 'flickr_june_2019':
-            res = self.db[collection].find({"$and":[{"wild": True},{keys[self.dbName]:{"$gte": self.timeFrameStart}}]})
-        else:
-            #gather results for iNaturalist
-            res = self.db[collection].find({"$and": [{'captive': False},{'time_observed_utc': \
-                                                                         {"$gte":self.timeFrameStart}}]})
-        #create a list of all the times (in original UTC format) in respective fields for each platform    
-        self.timePosts = [x[keys[self.dbName]] for x in res]
-        if len(self.timePosts) < 1:
-            print("No videos were processed yet.")
-            return
-        #IMPORTANT: self.dates() is a list of datetime.date() objects of wild encounters within the time frame
-        #it converts .datetime objs to more general .date objs (easier to work with)
-        #and then sorts the converted dates in a list with most recent at beginning and least recent towards end
-        self.dates = [x.date() for x in self.timePosts] 
-        self.dates.sort() 
-        
-        # Find the difference in days between posting dates of successive posts
-        lastDate = [self.dates[0]]  #stores all the dates we have already looked at
-        timeDiffs = []
-        for date in self.dates:
-            res = abs(date - lastDate[-1])#find the time difference between successive posts sorted
-            timeDiffs.append(res.days)
-            lastDate.append(date)
-
-        # Plotting the histogram
-        plt.figure(figsize=(15,5))
-        plt.hist(timeDiffs, bins = 10, histtype = 'bar', rwidth = 0.8)
-        plt.xlabel('Days between succesive posts')
-        plt.ylabel('Number of posts')
-        plt.title('Histogram for Time Between Succesive Wild Posts')
-        plt.show()
-        
+            
+        print('No more items to proceed.')     
       
-    #structures a dictionary as such: {week_0: 2, week_1: 15, week_2: 37 ...} from a list of dates
-    #plots number of posts (y axis) vs week # (x axis)
-    def postsPerWeek(self): 
+    ## structures a dictionary containing the number of posts per week within the time frame
+    ## as such: {week_0: 2, week_1: 15, week_2: 37 ...} from a list of dates
+    def postsPerWeek(self, dates):
+        self.dates = dates
         start = self.timeFrameStart.date()
-        end = datetime.date.today()
+        end = self.timeFrameEnd.date()#datetime.date.today()
         weekNumber = 1
         count = 0
         self.dictWeekNumbers = {}
@@ -279,10 +345,12 @@ class Database:
        
         return self.postsPerWeekDict, numOfPosts
     
-    # Finds postsPerWeek for a given species + platform
-    #structures a dictionary as such: {week_0: 2, week_1: 15, week_2: 37 ...} from a list of dates
-    #plots number of posts (y axis) vs week # (x axis)
+    
+    ## Finds postsPerWeek for a given species + platform
+    ## structures a dictionary as such: {week_0: 2, week_1: 15, week_2: 37 ...} from a list of dates
+    ## plots number of posts (y axis) vs week # (x axis)
     def postsPerWeekSpecies(self, collection): #, YYYY = 2019, MM = 6, DD = 1):
+        #keys to access each platform's different date/time field
         keys = {'youtube': 'publishedAt', 'twitter': 'created_at', 'iNaturalist': 'time_observed_utc', 'flickr_june_2019': 'datetaken'}
 
         #gather results for youtube or twitter or flickr
@@ -301,9 +369,8 @@ class Database:
         if len(timePosts) < 1:
             print("No videos were processed yet.")
             return
-        #IMPORTANT: self.dates() is a list of datetime.date() objects of wild encounters within the time frame
-        #it converts .datetime objs to more general .date objs (easier to work with)
-        #and then sorts the converted dates in a list with most recent at beginning and least recent towards end
+        
+        ## get list of dates of platform's posts and sort
         if self.dbName == 'youtube' or self.dbName == 'twitter' or self.dbName == 'flickr_june_2019':
             dates = [x.date() for x in timePosts] 
             dates.sort() 
@@ -314,11 +381,10 @@ class Database:
                     dates.append(x.date())
                 except TypeError:
                     print('TypeError', type(x), x)
-#             dates = [datetime.datetime.strptime(x, "%Y-%m-%dT%H:%M:%S.%fZ").date() for x in timePosts]
             dates.sort()
 
         start = self.timeFrameStart.date()
-        end = datetime.date.today()
+        end = self.timeFrameEnd.date() ##datetime.date.today()
         weekNumber = 1
         count = 0
         dictWeekNumbers = {}
@@ -332,7 +398,6 @@ class Database:
             dictWeekNumbers[weekNumber] = date 
             date += datetime.timedelta(days = 7)
             weekNumber += 1
-        #print("\n week number dictionary: \n", self.dictWeekNumbers)   
     
         #make a dictionary self.postsPerWeek
         #keys are datetime objects of the date to start a new week
@@ -348,7 +413,8 @@ class Database:
             count = 0
         
         return postsPerWeekDict, numOfPosts
-            
+        
+        
     #use numpy to compute and plot the smoothed out posts per week stats in order to visualize any trends
     #plot average number of posts (y-axis) vs week # (x axis)
     #returns a list of simple moving average data points
@@ -361,6 +427,7 @@ class Database:
         self.smas = np.convolve(postsPerWeekList, weights, 'valid') #calculate simple moving averages (smas)
         return self.smas  
     
+    
     # Finds postsPerWeek for a given species + platform
     def movingAveragePostsSpecies(self,collection, window):
         postsPerWeekDict, numOfPosts = self.postsPerWeekSpecies(collection)
@@ -372,273 +439,9 @@ class Database:
         smas = np.convolve(postsPerWeekList, weights, 'valid') #calculate simple moving averages (smas)
         return smas
     
-    #customized to youtube only so far
-    def heatmap(self,collection, csvName):
-        csvName = csvName +'.csv'
-        #docs_w_loc = self.db[collection].find({'$and': [{'wild': True}, {'newLocation':{'$ne':0}}]})
-        docs_w_loc = self.db[collection].find({'newLocation':{'$ne':0}})
-        loc_list = []
-        for doc in docs_w_loc:
-            try:
-                dic = {
-                    'videoID' : doc['videoID'],
-                    'newLocation':doc['newLocation']
-                }
-                loc_list.append(dic)
-                #print(doc)
-            except KeyError:
-                if KeyError == 'newLocation':
-                    pass     
-        
-        fields = ['videoID', 'newLocation'] 
-        with open(csvName, 'w') as locations_csv:
-            csvName = csv.DictWriter(locations_csv, fieldnames = fields)
-            csvName.writeheader()
-            for item in loc_list:
-                csvName.writerow(item)
-        print('Done. Check in your jupyter files for a .csv file with the name you entered')
-        
-    #makes a csv with both encounter and user locs from docs in YT wild col within the timeframe  
-    def reverse_geocode_yt(self, wild_collection, video_channel_country_dics, csv_name):
-        #read in csv file with country codes 
-        country_codes = {}
-        file = open('/Users/mramir71/Documents/Github/wildbook-social-1/wildbook_social/Database/country_codes.csv', 'r')
-        reader = csv.reader(file)
-        for row in reader:
-            country_codes[row[0]] = row[1]
-        country_codes[0] = 0
-        
-        # convert country codes to full names
-        for dic in video_channel_country_dics:
-            doc_res = self.db[wild_collection].find({'_id': dic['videoId']})
-            try:
-                dic['user_country'] = country_codes[dic['user_country']]
-            except KeyError:
-                pass
-            for doc in doc_res:
-                dic['encounter_loc'] = doc['newLocation']
-                
-        #create a dataframe with video_channel_country_dics
-        df = pd.DataFrame(video_channel_country_dics)
-        
-        #use bing geocoder to convert cities/countries -> lat, long coords
-#         key = 'AsmRvBYNWJVq55NBqUwpWj5Zo6vRv9N_g6r96K2hu8FLk5ob1uaXJddVZPpMasio'
-#         locator = Bing(key)
-        user_locs = []
-        enc_locs = []
-        
-        #df where there are videos in tf that have BOTH encounter and user loc
-        df_both_locs = df.loc[(df.encounter_loc != 0 ) & (df.user_country != 0) & (df.encounter_loc != "none") & \
-                               (df.encounter_loc != None) & (df.encounter_loc != "n/a")]
-        df_both_locs = df_both_locs.reset_index(drop=True)
-                
-        ## handle AttributeError
-        geolocator = Nominatim(user_agent='wb_geocoder')#"geoapiExercises")
-        enc_lat=[]
-        enc_long=[]
-        user_lat=[]
-        user_long=[]
-        
-        print(len(df_both_locs))
-        enc_idx =-1 
-        for x in df_both_locs.encounter_loc.values:
-            enc_idx+=1
-            try:
-                lat=geolocator.geocode(x).latitude
-                long=geolocator.geocode(x).longitude
-                enc_lat.append(lat)
-                enc_long.append(long)
-            except AttributeError:
-                ## loc could not be geocoded, drop this row in df_coords to make lists equal length
-                print('Error in enc locs: ', x, enc_idx)
-                df_both_locs= df_both_locs.drop(index=enc_idx)
-                
-        user_idx=-1
-        for x in df_both_locs.user_country.values:
-            user_idx+=1
-            try:
-                lat= geolocator.geocode(x).latitude
-                long= geolocator.geocode(x).longitude
-                user_lat.append(lat)
-                user_long.append(long)
-            except AttributeError:
-                ## loc could not be geocoded, drop this row in df_coords
-                print('Error in user locs: ', x)
-                df_both_locs= df_both_locs.drop(index=enc_idx)
-
-        print(len(enc_lat))
-        print(len(enc_long))
-        print(len(user_lat))
-        print(len(user_long))
-                                          
-        #add enc_coords list and user_coords list to df_both_locs
-        df_both_locs['enc_lat'] = enc_lat
-        df_both_locs['enc_long'] = enc_long
-        df_both_locs['user_lat'] = user_lat
-        df_both_locs['user_long'] = user_long
-        
-        return df_both_locs 
-    
-    ## create a dataframe of latitudes and longitudes of encounter locs
-    ## for each document in iNat wild_collection
-    def plot_enc_locs_iNat(self, wild_collection):
-        doc_res= self.db[wild_collection].find()
-        enc_lats=[]
-        enc_longs=[]
-        ## gather encounter lats and longs for each doc in wild col
-        for doc in doc_res:
-            enc_lats.append(doc['latitude'])
-            enc_longs.append(doc['longitude'])
-        
-        ## build df
-        df_coords= pd.DataFrame({"enc_lat": enc_lats, 
-                                 "enc_long": enc_longs})
-        
-        return df_coords
-    
-    
-    # reverse geocode each user location for each corresponding item
-    # then return df with latitude and longitude of encounter locations 
-    # and latitude and longitude of user locations
-    def reverse_geocode_flickr(self, user_info, wild_collection):
-        # add the encounter locations to our user info dictionaries
-        # which already contain user location
-        for dic in user_info:
-            doc_res = self.db[wild_collection].find({'id': dic['id']})
-            for doc in doc_res:
-                dic['enc_lat'] = doc['latitude']
-                dic['enc_long'] = doc['longitude']
-        
-        #create a df from our user_info list of dictionaries
-        df = pd.DataFrame(user_info)
-    
-        #use bing geocoder to convert cities/countries -> lat, long coords
-        key = 'AsmRvBYNWJVq55NBqUwpWj5Zo6vRv9N_g6r96K2hu8FLk5ob1uaXJddVZPpMasio'
-        locator = Bing(key)
-        user_locs = []
-        enc_locs = []
-        
-        #df where there are videos in tf that have BOTH encounter and user loc
-        df_both_locs = df.loc[(df.enc_long != 0) & (df.user_location != None) & (df.user_location != '')]
-        df_both_locs = df_both_locs.reset_index(drop=True)
-        
-        #get user country lat long coords
-        user_lat = []
-        user_long = []
-        for x in df_both_locs.user_location.values:
-            if(x == ''):
-                print('empty')
-                continue
-            try:
-                user_lat.append(locator.geocode(x, timeout = 3).latitude)
-                user_long.append(locator.geocode(x, timeout = 3).longitude)
-            except AttributeError:
-                user_lat.append(None)
-                user_long.append(None)
-                
-        #drop rows in df where user_lat = None, user_long = None
-#         rows = df_both_locs.loc[df_both_locs.user_lat == None or df_both_loc.user_location == '']
-#         print(rows)
-#         df_both_locs = df_both_locs.loc[df_both_locs.user_lat == None or df_both_loc.user_location == '']
-#         df_both_locs.drop(rows)
-                                                  
-        #add enc_coords list and user_coords list to df_both_locs
-        df_both_locs['user_lat'] = user_lat
-        df_both_locs['user_long'] = user_long
-        
-        return df_both_locs
-    
-    # plot user and encounter locations, with a line connecting corresponding entries
-    def plotEncounterUserLocs(self, df_coords, saveTo, platform):
-        #initialize a space for figure
-        fig = go.Figure()
-        
-        #what to add as text parameter for markers
-        keys = {'youtube': 'user_country', 'flickr_june_2019': 'user_location'}
-
-        #add the user country markers
-        fig.add_trace(go.Scattergeo(
-            lon = df_coords['user_long'],
-            lat = df_coords['user_lat'],
-            hoverinfo = 'text',
-            text = df_coords['user_country'], #df_coords[keys[platform]], #df_coords['user_country'],
-            mode = 'markers',
-            marker = dict(
-                size = 4,
-                color = 'rgb(0, 255, 0)',
-                line = dict(
-                    width = 3,
-                    color = 'rgba(65, 65, 65, 0)'
-                )
-            )))
-
-        #add the encounter location markers
-        fig.add_trace(go.Scattergeo(
-            lon = df_coords['enc_long'],
-            lat = df_coords['enc_lat'],
-            hoverinfo = 'text',
-            text = df_coords['encounter_loc'], #df_coords[keys[platform]], #df_coords['encounter_loc'],
-            mode = 'markers',
-            marker = dict(
-                size = 4,
-                color = 'rgb(255, 0, 0)',
-                line = dict(
-                    width = 3,
-                    color = 'rgba(68, 68, 68, 0)'
-                )
-            )))
-
-        # #begin to add path traces from user country to encounter locations
-        # flight_paths = []
-        for i in range(len(df_coords)):
-            fig.add_trace(
-                go.Scattergeo(
-                    lon = [df_coords['user_long'][i], df_coords['enc_long'][i]],
-                    lat = [df_coords['user_lat'][i], df_coords['enc_lat'][i]],
-                    mode = 'lines',
-                    line = dict(width = 1,color = 'blue')#,
-        #             opacity = float(df_coords['cnt'][i]) / float(df_flight_paths['cnt'].max()),
-                )
-            )
-
-        #update parameters of map figure to display
-        fig.update_layout(
-            title_text = saveTo + " sightings since 06.01.2019",
-            showlegend = False,
-            geo = dict(
-                scope = 'world',
-                projection_type = 'equirectangular', #'azimuthal equal area',
-                showland = True,
-                landcolor = 'rgb(243, 243, 243)',
-                countrycolor = 'rgb(204, 204, 204)',
-            ),
-        )
-        print('showing')
-        fig.show()
-        
-    #makes a csv with both encounter and user locs from docs in Flickr wild col within the timeframe 
-    def allLocsCsvFlickr(self, wild_collection, owner_id_loc_dicts):
-        csv_name_all_locs = wild_collection + " All Locs Flickr.csv"
-        #add encounter location onto ownerIdLocDicts
-        for dic in owner_id_loc_dicts:
-            doc_res = self.db[wild_collection].find({'id': dic['id']})
-            for doc in doc_res:
-                dic['encounter_loc'] = "{lat}, {long}".format(lat = doc['latitude'], long = doc['longitude'])
-        
-        #build df
-        df = pd.DataFrame              
-        #create csv        
-#         fields = ['id', 'user_id','encounter_loc', 'user_location']
-#         with open(csv_name_all_locs, 'w') as all_locs_csv:
-#             csv_name_all_locs = csv.DictWriter(all_locs_csv, fieldnames = fields)
-#             csv_name_all_locs.writeheader()
-#             for dic in owner_id_loc_dicts:
-# #                 if dic['encounter_loc'] != "0, 0" and dic['user_location'] != " ":
-#                   csv_name_all_locs.writerow(dic)
-#         print('Done.Check in your jupyter files for a .csv file for user and encounter locations')
             
-    #add channelId and user_country fields to docs in gen. and wild YT collections for all docs in timeframe
-    def update_docs_channel_country(self, general_collection, wild_collection, video_channel_country_dics):
+    #add channelId and user_country fields to docs in general and wild YT collections for all docs in timeframe
+    def updateDocsChannelCountry(self, general_collection, wild_collection, video_channel_country_dics):
         for dic in video_channel_country_dics:
             self.db[general_collection].update_one({'_id': dic['videoId']}, {'$set': {'channelId': dic['channelId'],\
                                                                             'user_country': dic['user_country']}})
@@ -647,12 +450,11 @@ class Database:
         
     #For YouTube Playground
     #get videoID's for each document that belongs to a wild encounter within timeframe
-    #self.listOfDates consists of each date that our documents within the timeframe were published at
+    #dates consists of each date that our documents within the timeframe were published at
     #return a list of videoID's
     def getVideoIDs(self, collection):
-        docs = self.db[collection].find({"wild": True})     
-        #dateutil.parser.parse(doc['publishedAt']).date()
-        self.listOfVideoIDs = [doc['videoID'] for doc in docs if doc['publishedAt'].date() in self.dates] 
+        docs = self.db[collection].find({'$and': [{"wild": True}, {"publishedAt": {"$gte": self.timeFrameStart}}]})         
+        self.listOfVideoIDs = [doc['videoID'] for doc in docs]
         return self.listOfVideoIDs
     
     #for Flickr Playground
@@ -668,112 +470,7 @@ class Database:
             listOfDicts.append(ownerIdDict)
         return listOfDicts
 
-    #method to compute the number of wild encounter posts a user uploads
-    #configured for the following plastforms so far:
-    #1. YouTube, 2. , 3. ,4.
-    # postsPerUser works by constructing a pandas Dataframe object for each user who posted a wild encounter
-    # columns in the dataframe are: CHANNEL_ID(user), COUNTRY_ABBREVIATION, COUNTRY_FULL, NUM_POSTS
-    # each row of the dataframe would then correspond to a different user
-    #user_countries is a list of dictionaries such that [{ channelID: country_abbreviation}, {...}, {...}]
-    def postsPerUser(self, wild_collection, channel_id_list): #, user_dict_list):
-        #//////for YouTube///////
-        #iterate through the list of channel id's and increase count -- store in user_count_dict 
-        #user_count_dict is structured as {channelId : count, channelId: count, ...}
-        self.list_of_users = [] # structured as [{channelID: count, country: ___ }, ...]
-        user_count_dict = {} 
-        for each_user_id in channel_id_list:
-            if each_user_id not in user_count_dict.keys():
-                user_count_dict[each_user_id] = 0
-            user_count_dict[each_user_id] = user_count_dict[each_user_id] + 1
         
-        #if CSV writing fails, uncomment this - paste what is printed into excel and go from there
-        for user_id in user_count_dict:
-            print(user_id, ':', user_count_dict[user_id])  
-        return self.list_of_users
-    
-        
-    #method to build a dataframe consisting of encounter times, upload times, 
-    #encounter location, and user location for each post gathered
-    #this is for visualizing/plotting difference b/w upload and encounter times
-    def buildDataFrame(self, collection):
-        #setup
-        find_keys = {"youtube": "publishedAt", "iNaturalist": "time_observed_utc"}
-        if self.dbName != "iNaturalist": 
-            wild_col = collection + " wild"
-        else: 
-            wild_col = collection
-        #retrieve relevant, wild documents within timeframe
-        if self.dbName != "youtube" and self.dbName != "iNaturalist":
-            res = self.db[wild_col].find()
-        else:
-            res = self.db[wild_col].find({find_keys[self.dbName]:{"$gte": self.timeFrameStart}})    
-        res_list = [x for x in res]
-        
-        #keys to access fields needed to make rows and cols of dataframe
-        #for each key's (self.dbName) list of values in df_keys:
-        #INDEX 0: doc key for post id's across platforms
-        #INDEX 1: doc key for encounter times
-        #INDEX 2: doc key for time post was uploaded
-        #INDEX 3: doc key for wild encounter locations
-        #INDEX 4: will be doc key for user locations 
-        df_keys = {'youtube': ['videoID', 'publishedAt', 'publishedAt', 'newLocation' ], 
-                   'twitter': ['_id', 'created_at', 'created_at', 'location'], 
-                   'iNaturalist': ['id', 'time_observed_utc', 'created_on', ['latitude', 'longitude']], 
-                   'flickr_june_2019': ['id', 'datetaken', 'dateupload', ['latitude', 'longitude']]}
-        
-        #1.create list of id's for each post (rows)
-        id_list = [x[df_keys[self.dbName][0]] for x in res_list] 
-        print(len(id_list))
-        
-        #2.create a list of wild encounter times (col 1)
-        #for youtube, we will use 'publishedAt' as a stand in
-        #however it is worth investigating the fileDetails.creationTime obj for each video
-        #twitter also does not have field to pinpoint exact encounter time so we use published time
-        encounter_times = [x[df_keys[self.dbName][1]] for x in res_list]
-        
-        #3.create a list of upload times
-        #NOTE: dataupload for flicker is a UNIX time objective so we must convert to UTC
-        upload_times = [x[df_keys[self.dbName][2]] for x in res_list]
-        if self.dbName == 'flickr_june_2019':
-            upload_times_temp = [dateutil.parser.parse(time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(int(x))))\
-                                 for x in upload_times]
-            upload_times = upload_times_temp
-
-        #4.create a list of encounter locations (location of video or post encounter)
-        if self.dbName == 'flickr_june_2019' or self.dbName == 'iNaturalist':
-            geo_coords = [str(x['latitude']) + ", " + str(x['longitude']) \
-                          if x['latitude'] != None or x['longitude'] != None else None for x in res_list]
-            encounter_locations = geo_coords #eventually convert to an actual location via reverse geocoding
-        else:
-            encounter_locations = [x[df_keys[self.dbName][3]] for x in res_list] 
-        
-        #5.create a list of user locations
-        #for YT, try to add the channelID for each video onto the doc in mongo itself
-        #and change YT script to do this from now on
-        user_locations = [None for x in res_list]
-        
-        #6. Assemble the dataframe
-        data = {"ID" : id_list,
-                "ENCOUNTER TIME" : encounter_times,
-                "UPLOAD TIME": upload_times,
-                "ENCOUNTER LOC" : encounter_locations,
-                "USER LOC" : user_locations 
-                }
-        df = pd.DataFrame(data)
-        
-        #7.zip encounter times and upload times list to find difference and graph
-        #delay_times = [(x[1] - x[0]).days for x in zipped_times]
-        #df['DELAY'] = df['UPLOAD TIME']- df['ENCOUNTER TIME']
-        zipped_times = [zip(encounter_times, upload_times)] 
-        delay_times = []
-        for x in zipped_times:
-            for item in x:
-                delay = item[1].date() - item[0].date()
-                delay_times.append(delay.days)
-        df['DELAY'] = delay_times
-        df.plot.bar(x = 'ID', y = 'DELAY', figsize=(10,10))
-        return df
-    
     def getFlickrTags(self, collection, getIrrelevantData):
         # Make a query to the specific DB and Collection
         if(getIrrelevantData):
@@ -784,9 +481,6 @@ class Database:
         # Expand the cursor and construct the DataFrame
         df =  pd.DataFrame(list(cursor))
 
-        # # Delete the _id
-        # if no_id:
-        #     del df['_id']
         return df
     
     #add newLocation field to relevant, wild docs in YT database
@@ -806,6 +500,7 @@ class Database:
                 'flickr_june_2019': {'wild':True}}
         newDocs = self.db[existingCollection].find(keys[nameOfDb])
         newCollection = existingCollection + " wild"
+        
         #insert "wild" encounter items from existingCollection into newCollection
         #if not already in newCollection
         for item in newDocs:
@@ -813,7 +508,70 @@ class Database:
                 self.db[newCollection].insert_one(item)
             else:
                 pass
-                
+        
+        
+    def getWildCountsAllSpecies(self, nameOfDb):
+        species_cols = {'youtube': ["humpback whales", "new whale sharks test", "iberian lynx", "Reticulated Giraffe", "grevys zebra", "plains zebras"]}
+        species_wild_counts = []
+        species_rel_counts =[]
+        
+        
+        for collection in species_cols[nameOfDb]:
+            wild_count = self.db[collection].count({"wild": True})
+            rel_count = self.db[collection].count({"relevant": True})
+            
+            species_wild_counts.append(wild_count)
+            species_rel_counts.append(rel_count)
+            
+            
+        df_counts = pd.DataFrame({'Species': species_cols[nameOfDb],
+                                   'Num_Wild_Docs': species_wild_counts,
+                                   'Num_Relevant_Docs': species_rel_counts})
+        
+        return df_counts
+            
+    
+    def getNumFiltered(self, collection):
+        filtered_count = self.db[collection].count({"relevant":{"$ne":None}})
+        col_count = self.db[collection].count()
+        
+        #print('The number of documents searched through for collection: {} is {}'.format(collection, filtered_count))
+        return filtered_count, col_count
+    
+    ## create a df consisting of collection_name fofr query terms, count of wild docs,
+    ## and count of relevant docs. Df is used in creating nested pie chart for comparison of 
+    ## query terms on a per species basis
+    ## Parameters: 
+    ## speciesColNames = a list of collection names created for each query term 
+    def makeQueryTermDataframe(self, speciesColNames):
+        df = pd.DataFrame(columns = ["Col_Name", "Wild_Count", "Captive_Count", "Relevant_Count", "Num_Filtered", "Num_Total"])
+        row_idx = 0
+        
+        for col_name in speciesColNames:
+            wild_count = self.db[col_name].count({"wild": True})
+            captive_count = self.db[col_name].count({"$and":[{"wild": False}, {"relevant": True}]})
+            rel_count = self.db[col_name].count({"relevant": True})
+            num_filtered, num_total = self.getNumFiltered(col_name)
+            
+            print(wild_count, rel_count)
+            new_item = {"Col_Name": col_name,
+                        "Wild_Count": wild_count,
+                        "Captive_Count": captive_count,
+                        "Relevant_Count": rel_count, 
+                        "Num_Filtered": num_filtered,
+                        "Num_Total": num_total
+                       }
+            df.loc[row_idx] = new_item
+            row_idx += 1
+        
+#         #add column sums to our dataframe on the last row
+#         df.loc[row_idx] = {'Col_Name': 'Totals',
+#                            'Wild_Count': df['Wild_Count'].sum(),
+#                            'Relevant_Count': df['Relevant_Count'].sum()}
+        
+        return df    
+            
+        
     def clearCollection(self, collection, msg=''):
         if (msg == 'yes'):
             self.db[collection].delete_many({})
@@ -823,4 +581,3 @@ class Database:
             
     def close(self):
         self.client.close()
-        
