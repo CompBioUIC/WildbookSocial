@@ -2,7 +2,7 @@
 from pymongo import MongoClient
 import pprint
 from IPython.display import YouTubeVideo, Image, display, Video
-from wildbook_social import EmbedTweet
+# from wildbook_social import EmbedTweet
 from datetime import timedelta
 import time
 import dateutil.parser
@@ -511,7 +511,10 @@ class Database:
         
         
     def getWildCountsAllSpecies(self, nameOfDb):
-        species_cols = {'youtube': ["humpback whales", "new whale sharks test", "iberian lynx", "Reticulated Giraffe", "grevys zebra", "plains zebras"]}
+        species_cols = {'youtube': ["humpback whales", "new whale sharks test", "iberian lynx", "Reticulated Giraffe", "grevys zebra", "plains zebras"],
+                        'flickr': ["humpback whale", "whale shark", "iberian lynx", "reticulated giraffe", "plains zebra", "grevy zebra"],
+                        'iNaturalist': ["humpback whales", "whale sharks", "iberian lynx", "reticulated giraffe", "plains zebra", "grevy's zebra"]
+                        }
         species_wild_counts = []
         species_rel_counts =[]
         
