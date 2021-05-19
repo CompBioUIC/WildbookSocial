@@ -12,6 +12,7 @@ import plotly.graph_objects as go
 import plotly.io as pio
 import matplotlib.pyplot as plt
 import seaborn as sns
+import numpy as np
 
 
 ## class that handles all visuals and computations to extract encounter and/or user locations
@@ -218,8 +219,7 @@ class Geospatial:
         #access different platform's text keywords/labels for labeling each dot on the map
         keys = {'youtube': ['encounter_loc', 'user_country'], 'flickr_june_2019': ['id', 'user_location'], 'iNaturalist': ['enc_lat']}
         
-       
-        #add the encounter location markers (red)
+       #add the encounter location markers (red)
         if enc_locs == True:
             encounter_loc_label = keys[platform][0]
             fig.add_trace(go.Scattergeo(
@@ -281,11 +281,306 @@ class Geospatial:
                         landcolor = 'rgb(243, 243, 243)',
                         countrycolor = 'rgb(204, 204, 204)',
                     ),
+                    height = 1000
                 )
 
         #display
         fig.show("notebook")
         
+    
+    def plotEncounterAndUserLocationsAllSpecies(self, df_coords, platform, enc_locs = False, user_locs = False):
+        
+        '''
+            function to visualize encounter and corresponding user locations for posts via map using plotly express
+            Connecting Lines color coded by species; all encounter location dots = same color; all user locations = same color
+        '''
+        
+        #initialize a space for figure
+        fig = go.Figure()
+        
+        #access different platform's text keywords/labels for labeling each dot on the map
+        keys = {'youtube': ['encounter_loc', 'user_country'], 'flickr_june_2019': ['id', 'user_location'], 'iNaturalist': ['enc_lat']}
+        
+       #add the encounter location markers - black
+        if enc_locs == True:
+            encounter_loc_label = keys[platform][0]
+            fig.add_trace(go.Scattergeo(
+                        lon = df_coords['enc_long'],
+                        lat = df_coords['enc_lat'],
+                        hoverinfo = 'text',
+                        text = df_coords[encounter_loc_label], #df_coords['encounter_loc'], 
+                        mode = 'markers',
+                        name = 'encounter_locations',
+                        marker = dict(
+                            size = 4,
+                            color = 'black'
+                        )))
+
+    
+    
+        #add the user country markers - magenta
+        if user_locs == True:
+            user_country_label = keys[platform][1]
+            fig.add_trace(go.Scattergeo(
+                        lon = df_coords['user_long'],
+                        lat = df_coords['user_lat'],
+                        hoverinfo = 'text',
+                        text = df_coords[user_country_label], 
+                        mode = 'markers',
+                        name = 'user_locations',
+                        marker = dict(
+                            size = 4,
+                            color = 'magenta',
+                        )))
+
+        #add path traces (blue) from user country to encounter locations, if both features are available
+        # iterate by species collections
+        species_color = {'humpback whale': 'blue', 
+                         'whale shark': 'cyan', 
+                         'iberian lynx': 'purple', 
+                         'reticulated giraffe': 'yellow',
+                         'grevy zebra': 'green', 
+                         'plains zebra': 'coral'}
+        
+        if user_locs and enc_locs:
+            
+            #iterate through each species' coordinates
+            for species, species_color in species_color.items():
+                #determine whether or not to hide trace instance in legend
+                first_species_instance = True
+
+                #tuple of df indices where species is the current species key
+                species_idx = np.where(df_coords['species'] == species)
+                
+                #add traces between species coordinates connecting user loc to enc loc
+                for i in species_idx[0]:
+                    fig.add_trace(
+                        go.Scattergeo(
+                                    lon = [df_coords['user_long'][i], df_coords['enc_long'][i]],
+                                    lat = [df_coords['user_lat'][i], df_coords['enc_lat'][i]],
+                                    mode = 'lines',
+                                    line = dict(width = 1,color = species_color),
+                                    visible = True,
+                                    name = species +'  '+ str(len(species_idx[0])),
+                                    showlegend = first_species_instance
+                            )
+                        )
+                    #after adding first species trace, no longer show legend
+                    first_species_instance= False
+        
+        #update parameters of map figure to display
+        fig.update_layout(
+                    title_text = 'Flickr Species Sightings Since 06.01.2019',
+                    legend_traceorder = 'grouped',
+                    showlegend = True,
+                    geo = dict(
+                        scope = 'world',
+                        projection_type = 'equirectangular', #'azimuthal equal area',
+                        showland = True,
+                        landcolor = 'rgb(243, 243, 243)',
+                        countrycolor = 'rgb(204, 204, 204)',
+                    ),
+                    height = 1000,
+                )
+        
+        #display
+        fig.show("notebook")
+
+    def plotEncounterAndUserLocationsAllSpeciesV2(self, df_coords, platform, enc_locs = False, user_locs = False):
+        
+        '''
+            function to visualize encounter and corresponding user locations for posts via map using plotly express
+            No connecting lines only colorcoded points for encounter and user locations
+        '''
+        encounter_colors = {'humpback whale': 'blue', 
+                         'whale shark': 'cyan', 
+                         'iberian lynx': 'purple', 
+                         'reticulated giraffe': 'yellow',
+                         'grevy zebra': 'green', 
+                         'plains zebra': 'coral'}
+        
+        user_colors = {'humpback whale': 'lightblue', 
+                         'whale shark': 'lightcyan', 
+                         'iberian lynx': 'lavender', 
+                         'reticulated giraffe': 'lightyellow',
+                         'grevy zebra': 'lightgreen', 
+                         'plains zebra': 'lightcoral'}
+        
+        #initialize a space for figure
+        fig = go.Figure()
+        
+        #access different platform's text keywords/labels for labeling each dot on the map
+        keys = {'youtube': ['encounter_loc', 'user_country'], 'flickr_june_2019': ['id', 'user_location'], 'iNaturalist': ['enc_lat']}
+        
+        #add the encounter location markers 
+        if enc_locs == True:
+
+            for species, species_color in encounter_colors.items():
+                #subdataframe that pertains to current species of interest only
+                species_df_coords = df_coords[df_coords['species'] == species]
+                
+                encounter_loc_label = keys[platform][0]
+                fig.add_trace(go.Scattergeo(
+                            lon = species_df_coords['enc_long'],
+                            lat = species_df_coords['enc_lat'],
+                            hoverinfo = 'text',
+                            text = species_df_coords[encounter_loc_label],  
+                            mode = 'markers',
+                            name = species + ' encounter locations ' + str(len(species_df_coords)),
+                            marker = dict(
+                                size = 3.5,
+                                color = encounter_colors[species]
+                            )))
+    
+        #add the user country markers 
+        if user_locs == True:
+            
+            for species, species_color in encounter_colors.items():
+                #subdataframe that pertains to current species of interest only
+                species_df_coords = df_coords[df_coords['species'] == species]
+                
+                user_country_label = keys[platform][1]
+                fig.add_trace(go.Scattergeo(
+                            lon = species_df_coords['user_long'],
+                            lat = species_df_coords['user_lat'],
+                            hoverinfo = 'text',
+                            text = species_df_coords[user_country_label], 
+                            mode = 'markers',
+                            name = 'user locations (all species)',
+                            marker = dict(
+                                size = 4,
+                                color = user_colors[species]
+                            )))
+        
+        
+        #update parameters of map figure to display
+        fig.update_layout(
+                    title_text = 'Flickr Species Sightings Since 06.01.2019',
+                    legend_traceorder = 'grouped',
+                    showlegend = True,
+                    geo = dict(
+                        scope = 'world',
+                        projection_type = 'equirectangular', #'azimuthal equal area',
+                        showland = True,
+                        landcolor = 'rgb(243, 243, 243)',
+                        countrycolor = 'rgb(204, 204, 204)',
+                    ),
+                    height = 1000
+                )
+        
+        #display
+        fig.show("notebook")
+        
+    def plotEncounterAndUserLocationsAllSpeciesV3(self, df_coords, platform, enc_locs = False, user_locs = False):
+        
+        '''
+            function to visualize encounter and corresponding user locations for posts via map using plotly express
+            Connecting Lines + Color Coded Encounter location coords; User coords --> black dots
+        '''
+        encounter_colors = {'humpback whale': 'blue', 
+                         'whale shark': 'cyan', 
+                         'iberian lynx': 'purple', 
+                         'reticulated giraffe': 'yellow',
+                         'grevy zebra': 'green', 
+                         'plains zebra': 'coral'}
+        
+        user_colors = {'humpback whale': 'lightblue', 
+                         'whale shark': 'lightcyan', 
+                         'iberian lynx': 'lavender', 
+                         'reticulated giraffe': 'lightyellow',
+                         'grevy zebra': 'lightgreen', 
+                         'plains zebra': 'lightcoral'}
+        
+        #initialize a space for figure
+        fig = go.Figure()
+        
+        #access different platform's text keywords/labels for labeling each dot on the map
+        keys = {'youtube': ['encounter_loc', 'user_country'], 'flickr_june_2019': ['id', 'user_location'], 'iNaturalist': ['enc_lat']}
+        
+        #add the encounter location markers 
+        if enc_locs == True:
+
+            for species, species_color in encounter_colors.items():
+                #subdataframe that pertains to current species of interest only
+                species_df_coords = df_coords[df_coords['species'] == species]
+                
+                encounter_loc_label = keys[platform][0]
+                fig.add_trace(go.Scattergeo(
+                            lon = species_df_coords['enc_long'],
+                            lat = species_df_coords['enc_lat'],
+                            hoverinfo = 'text',
+                            text = species_df_coords[encounter_loc_label],  
+                            mode = 'markers',
+                            name = species + ' encounter locations ' + str(len(species_df_coords)),
+                            marker = dict(
+                                size = 3.5,
+                                color = encounter_colors[species]
+                            )))
+    
+        #add the user country markers 
+        if user_locs == True:
+            
+            for species, species_color in encounter_colors.items():
+                #subdataframe that pertains to current species of interest only
+                species_df_coords = df_coords[df_coords['species'] == species]
+                
+                user_country_label = keys[platform][1]
+                fig.add_trace(go.Scattergeo(
+                            lon = species_df_coords['user_long'],
+                            lat = species_df_coords['user_lat'],
+                            hoverinfo = 'text',
+                            text = species_df_coords[user_country_label], 
+                            mode = 'markers',
+                            name = 'user locations (all species)',
+                            marker = dict(
+                                size = 4,
+                                color = 'black'
+                            )))
+
+        if user_locs and enc_locs:
+            
+            #iterate through each species' coordinates
+            for species, species_color in encounter_colors.items():
+                #determine whether or not to hide trace instance in legend
+                first_species_instance = True
+
+                #tuple of df indices where species is the current species key
+                species_idx = np.where(df_coords['species'] == species)
+                
+                #add traces between species coordinates connecting user loc to enc loc
+                for i in species_idx[0]:
+                    fig.add_trace(
+                        go.Scattergeo(
+                                    lon = [df_coords['user_long'][i], df_coords['enc_long'][i]],
+                                    lat = [df_coords['user_lat'][i], df_coords['enc_lat'][i]],
+                                    mode = 'lines',
+                                    line = dict(width = 1,color = species_color),
+                                    visible = True,
+                                    name = species +'  '+ str(len(species_idx[0])),
+                                    showlegend = first_species_instance
+                            )
+                        )
+                    #after adding first species trace, no longer show legend
+                    first_species_instance= False
+        
+        
+        #update parameters of map figure to display
+        fig.update_layout(
+                    title_text = 'Flickr Species Sightings Since 06.01.2019',
+                    legend_traceorder = 'grouped',
+                    showlegend = True,
+                    geo = dict(
+                        scope = 'world',
+                        projection_type = 'equirectangular', #'azimuthal equal area',
+                        showland = True,
+                        landcolor = 'rgb(243, 243, 243)',
+                        countrycolor = 'rgb(204, 204, 204)',
+                    ),
+                    height = 1000
+                )
+        
+        #display
+        fig.show("notebook")
     
     def visualizeDistanceDifferences(self, df_coords, collection):
         ''' function to plot a histogram on the differences between encounter and corresponding user locations
