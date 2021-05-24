@@ -50,24 +50,30 @@ class Flickr:
             json_data.append(data)
         return json_data
 
-    def search(self, q, date_since="2019-12-01", saveTo=False):
-#     def search(self, q, date_since="2019-12-01", coords, bbox = False, saveTo=False): #function signature for bbox coords
-    ##AFRICA BBOX - FOR GIRAFFES
-#         base_url = "https://www.flickr.com/services/rest/?\
-#             method=flickr.photos.search&api_key=6ab5883201c84be19c9ceb0a4f5ba959&text={text}&min_taken_date={min_date}&extras=description%2Cdate_upload%2C+date_taken%2C+owner_name%2C+last_update%2C+geo%2C+tags%2C+views%2C+media%2C+url_l&page={page}&bbox= -18.615646%2C-34.936608%2C50.993729%2C35.266926&format=json&nojsoncallback=1" 
-
-    ##WITHOUT BBOX
-        base_url = "https://www.flickr.com/services/rest/?\
-            method=flickr.photos.search&api_key=6ab5883201c84be19c9ceb0a4f5ba959&text={text}&min_taken_date={min_date}&extras=description%2Cdate_upload%2C+date_taken%2C+owner_name%2C+last_update%2C+geo%2C+tags%2C+views%2C+media%2C+url_l&page={page}&format=json&nojsoncallback=1"
+        
+    def search(self, q, date_since="2019-12-01", bbox = False, saveTo=False): #function signature for bbox coords
+        
+        if bbox:
+            base_url =  "https://www.flickr.com/services/rest/?method=flickr.photos.search&api_key=6ab5883201c84be19c9ceb0a4f5ba959&text={text}&min_taken_date={min_date}&extras=description%2Cdate_upload%2C+date_taken%2C+owner_name%2C+last_update%2C+geo%2C+tags%2C+views%2C+media%2C+url_l&page={page}&bbox={bbox_coords}&format=json&nojsoncallback=1"
+        
+        else:
+            base_url = "https://www.flickr.com/services/rest/?method=flickr.photos.search&api_key=6ab5883201c84be19c9ceb0a4f5ba959&text={text}&min_taken_date={min_date}&extras=description%2Cdate_upload%2C+date_taken%2C+owner_name%2C+last_update%2C+geo%2C+tags%2C+views%2C+media%2C+url_l&page={page}&format=json&nojsoncallback=1"
+        
+        
         if (saveTo and not self.db):
             saveTo = False
             print("Please provide 'db' argument with an instance to database to save tweet(s).")
 
         keyword = q.replace(' ','+')
         json_data = []
-        url = base_url.format(text=keyword,min_date=date_since,page='1') #tags=keyword
+        
+        if bbox:
+            coords = bbox.replace(',', '%2C')
+            url = base_url.format(text=keyword,min_date=date_since,bbox_coords = coords, page='1') #tags=keyword
+        else:
+            url = base_url.format(text=keyword,min_date=date_since, page='1') #tags=keyword
+                    
         r = requests.get(url)
-        print(r)
         response_data = r.json()
         data = self.clean_data(response_data)
         if (saveTo):
@@ -76,13 +82,19 @@ class Flickr:
                 self.db.addItem(item, saveTo)
         json_data.append(data)
         pages = response_data['photos']['pages']
-        print(pages,'Found with',keyword)
+        print(pages,'Pages Found with',keyword)
+        
         for page in range(2, pages+1):
-            print('page no.',page)
-            url = base_url.format(text=keyword,min_date=date_since,page=str(page)) #tags=keyword
+            print('Page no.',page)
+            
+            if bbox:
+                coords = bbox.replace(',', '%2C')
+                url = base_url.format(text=keyword,min_date=date_since,bbox_coords = coords, page='1') #tags=keyword
+            else:
+                url = base_url.format(text=keyword,min_date=date_since, page='1') #tags=keyword
+            
             r = requests.get(url)
             try:
-                print('in try')
                 response_data = r.json()
             except JSONDecodeError:
                 print("r: ", r)

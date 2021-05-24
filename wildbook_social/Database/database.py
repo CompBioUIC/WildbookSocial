@@ -35,9 +35,9 @@ class Database:
         self.client = MongoClient(key)
         self.dbName = database
         self.db = self.client[database]
-        self.dateStr = '2019-06-01T00:00:00.00Z' 
+        self.dateStr = '2019-03-01T00:00:00.00Z' 
         self.timeFrameStart = dateutil.parser.parse(self.dateStr)
-        self.timeFrameEnd = dateutil.parser.parse('2020-09-01T00:00:00.00Z')
+        self.timeFrameEnd = dateutil.parser.parse('2020-03-01T00:00:00.00Z')
         
         
     ## add a new doc to collection
@@ -61,6 +61,11 @@ class Database:
     def returnDbCol(self, saveTo):
         return self.db[saveTo]
     
+    
+    def renameCollection(self, oldCollection, newCollection):
+        self.db[oldCollection].rename(newCollection)
+        print('{} renamed to {}'.format(oldCollection, newCollection))
+        return
     
     ## update an existing item's field in collection
     def _updateItem(self, collection, id, payload):
@@ -151,23 +156,6 @@ class Database:
         print("Finished removing duplicates from collection")
     
     
-    ##method to remove duplicate docs for twitter
-    def removeDuplicatesTwitter(self, item, collection):
-
-        dup = self.db[collection].find({"$and": [{"_id": {"$ne":item["_id"]}}, {"img_url": item["img_url"]}]})   
-        numDuplicates = len(list(dup))
-
-        #duplicate docs in collection exist
-        if numDuplicates > 0:
-            print("numDups is > 0.. deleting duplicate docs...")
-
-            #delete duplicate docs from collection
-            while(numDuplicates > 0):
-                pipeline = {"$and": [{"_id": {"$ne":item["_id"]}}, {"img_url": item["img_url"]}]}
-                self.db[collection].remove(pipeline)
-                numDuplicates -= 1
-    
-    
     ## removes duplicate docs from flickr collection and returns bool value indicating if duplicates
     ## were found
     def removeDuplicatesFlickr(self, item, collection):
@@ -203,19 +191,6 @@ class Database:
                                                              {"publishedAt":{"$gte": self.timeFrameStart}}]})
                 if not item:
                     break
-            
-            #twitter - find an unsorted item and check for duplicates
-            elif self.dbName == 'twitter':
-                
-                # dont need to check time frame bc API only gets posts in last 7 days
-                item = self.db[collection].find_one({"relevant": None}) 
-                
-                # no more items to filter in collection
-                if not item:
-                    break 
-                    
-                # check if item has duplicates in twitter species collection
-                self.removeDuplicatesTwitter(item, collection)
                                    
             #flickr - find an unsorted item and check for duplicates
             elif self.dbName == 'flickr_june_2019':
@@ -241,10 +216,6 @@ class Database:
                     print("{}: {}".format(i, item['title']['original']))
                     display(YouTubeVideo(item['_id']))
 
-                elif self.dbName == 'twitter':
-                    url="https://twitter.com/{}/status/{}".format(item['user_handle'], item['_id'])
-                    display(EmbedTweet(url))
-
                 elif self.dbName == 'flickr_june_2019':
                     # try-except handles some documents having the new, updated name 'url' field rather than
                     # the 'url_l' (original, older version) 
@@ -252,7 +223,7 @@ class Database:
                     #delete the item from our collection and move on to next image (continue)
                     try:
                         if item['url'] != "":
-                            display(Image(item['url'], height=200, width=200))
+                            display(Image(item['url'], height=500, width=500))
                         else: 
                             #handle images w/o urls
                             self.db[collection].remove({'id': item['id']})
@@ -276,11 +247,11 @@ class Database:
 
                 # prompt user for wild or captive classification
                 if rel == True:
-                    print("Wild (y/n):", end =" ")
+                    print("Wild(y/n):", end =" ")
                     wild = True if input() == 'y' else False 
-
+                    
                     #prompt user with option to enter location only if encounter is wild (YT videos only)
-                    if (self.dbName == 'youtube' and wild == True) or (self.dbName == 'twitter' and wild == True):
+                    if (self.dbName == 'youtube' and wild == True):
                         print("Is there a location? (y/n):", end = " ")
                         if input() == "y": loc = input()
 
@@ -291,10 +262,6 @@ class Database:
                 if self.dbName == 'youtube':
                     self._updateItem(collection, item['_id'], {"relevant": rel, "wild": wild, "newLocation": loc })
                     print("Response saved! Location : {}.\n".format(loc))
-
-                elif self.dbName == 'twitter':
-                    self._updateItem(collection, item['_id'], {"relevant": rel, "wild": wild, "encounter_loc": loc })
-                    print("Twitter Response saved! Location : {}.\n".format(loc))
 
                 else:
                     self._updateItem(collection, item['_id'], {"relevant": rel, "wild": wild})
@@ -492,7 +459,6 @@ class Database:
         
         
     #method to form collections consisting of only wild docs for wildbook api call
-    #only tailored towards YouTube currently
     def relevantDocuments(self, existingCollection, nameOfDb):
         keys = {'youtube': {'wild':True}, 
                 'twitter': {'wild':True}, 
@@ -511,17 +477,28 @@ class Database:
         
         
     def getWildCountsAllSpecies(self, nameOfDb):
-        species_cols = {'youtube': ["humpback whales", "new whale sharks test", "iberian lynx", "Reticulated Giraffe", "grevys zebra", "plains zebras"],
-                        'flickr': ["humpback whale", "whale shark", "iberian lynx", "reticulated giraffe", "plains zebra", "grevy zebra"],
-                        'iNaturalist': ["humpback whales", "whale sharks", "iberian lynx", "reticulated giraffe", "plains zebra", "grevy's zebra"]
+        species_cols = {'youtube': ["humpback whales", "new whale sharks test", "iberian lynx", "Reticulated Giraffe", \
+                                    "grevys zebra", "plains zebras"],
+                        'flickr': ['humpback whale specific', 'whale shark specific','iberian lynx general multilingual', \
+                                  'reticulated giraffe specific', 'grevy zebra general',\
+                                  'plains zebra specific'],
+                        'iNaturalist': ["humpback whales", "whale sharks", "iberian lynx", "reticulated giraffe",\
+                                     "grevy's zebra", "plains zebra"]
                         }
         species_wild_counts = []
         species_rel_counts =[]
         
         
         for collection in species_cols[nameOfDb]:
-            wild_count = self.db[collection].count({"wild": True})
-            rel_count = self.db[collection].count({"relevant": True})
+            if nameOfDb == 'iNaturalist':
+                wild_count = self.db[collection].count({"captive": False})
+                rel_count = wild_count
+                
+            else:
+                wild_count = self.db[collection].count({"wild": True})
+                rel_count = self.db[collection].count({"relevant": True})
+                
+            
             
             species_wild_counts.append(wild_count)
             species_rel_counts.append(rel_count)
@@ -575,6 +552,36 @@ class Database:
         return df    
             
         
+    def makeVideoChannelCountryDicts(self, collection, df_user_locations):
+        #function to avoid using API and work with the data we already have stored
+        #to create dictionaries in the form of [{videoId: , channelId: , user_country: }, {...}]
+        video_channel_country = []
+        for i in df_user_locations.index:
+            
+            #search docs by channelID
+            channelID = df_user_locations['channelID'][i]
+            
+            #find the document and check if newLocation (encounter location) is != 0 and != null
+            res = self.db[collection].find({'channelId': channelID})
+            
+            try:
+                if res != None and res[0]['newLocation'] != None and res[0]['newLocation'] != 0:
+                    #print(res[0]['user_country'])
+
+                    #if we have an encounter location AND user location, make a dictionary and add to the list
+                    temp = {'videoId': res[0]['videoID'],
+                            'channelId': res[0]['channelId'], 
+                            'user_country': res[0]['user_country']}
+
+                    video_channel_country.append(temp)
+                    
+            except KeyError: 
+                pass
+                
+        return video_channel_country
+            
+    
+    
     def clearCollection(self, collection, msg=''):
         if (msg == 'yes'):
             self.db[collection].delete_many({})

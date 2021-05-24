@@ -279,23 +279,25 @@ class Visualize:
         inner_labels = [['wild', 'captive'] for col in df['Col_Name']] #['wild', 'captive','wild', 'captive', ...]
         inner_labels_flat = [item for sublist in inner_labels for item in sublist]
         
-        print(inner_labels)
-        print(vals)
-        
         #inner pie chart components - split up into %wild and %CAPTIVE for each collection
         ax.pie(vals.flatten(), radius=1-size, colors=inner_colors, \
                wedgeprops=dict(width=size, edgecolor='w'), \
                autopct='%1.1f%%', pctdistance=0.8, startangle=90, \
-               textprops={'color':"w", 'fontsize': 8})
+               textprops={'color':"w", 'fontsize': 0})
 
-        #outer pie chart legend with names of each collection and its corresponding color
-        legend1= plt.legend( df['Col_Name'], loc= "upper left", bbox_to_anchor = (1,1), title = "Collections")
-        
-        #inner pie chart legend with percentage breakdown of each collection [wild]
+        #combined labels
         tot_rel = df['Relevant_Count'].sum()
         vals_percent = vals/tot_rel * 100
-        legend2= plt.legend([np.round(percent, 1) for percent in vals_percent], loc= "lower left", bbox_to_anchor = (1,0.1), title =\
-                            "[%Wild, %Captive]")
+        vals_rounded = [np.round(percent, 1) for percent in vals_percent]
+        combined_labels = [df['Col_Name'][i] + ' '+ str(vals_rounded[i]) for i in range(0, len(df))]
+        raw_combined_labels = [df['Col_Name'][i] + ' '+ str(vals[i]) for i in range(0, len(df))]
+        
+        #outer pie chart legend with names of each collection and its corresponding color #df['Col_Name']
+        legend1= plt.legend( combined_labels, loc= "upper left", bbox_to_anchor = (1,1), title = "Query Term Collections [%Wild, %Captive]")
+        
+        #inner pie chart legend with percentage breakdown of each collection [wild]
+        legend2= plt.legend(raw_combined_labels, loc= "lower left", bbox_to_anchor = (1,0.1), title = \
+                            "Query Term Collections [Num Wild, Num Captive]")
         
         #include both legends with pie chart
         ax.add_artist(legend1)

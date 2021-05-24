@@ -273,7 +273,7 @@ class Geospatial:
         #update parameters of map figure to display
         fig.update_layout(
                     title_text = collection + " sightings since 06.01.2019",
-                    showlegend = False,
+                    showlegend = True,
                     geo = dict(
                         scope = 'world',
                         projection_type = 'equirectangular', #'azimuthal equal area',
@@ -281,7 +281,10 @@ class Geospatial:
                         landcolor = 'rgb(243, 243, 243)',
                         countrycolor = 'rgb(204, 204, 204)',
                     ),
-                    height = 1000
+                    width = 1000,
+                    height = 400,
+                    legend = dict(yanchor="middle",y=0.5,xanchor="left",x=1.0),
+                    margin= dict(l = 2,r = 2,b = 2,t = 2,pad = 2)
                 )
 
         #display
@@ -380,7 +383,10 @@ class Geospatial:
                         landcolor = 'rgb(243, 243, 243)',
                         countrycolor = 'rgb(204, 204, 204)',
                     ),
-                    height = 1000,
+                    width = 1000,
+                    height = 400,
+                    legend = dict(yanchor="middle",y=0.5,xanchor="left",x=1.0),
+                    margin= dict(l = 2,r = 2,b = 2,t = 2,pad = 2)
                 )
         
         #display
@@ -455,7 +461,6 @@ class Geospatial:
         
         #update parameters of map figure to display
         fig.update_layout(
-                    title_text = 'Flickr Species Sightings Since 06.01.2019',
                     legend_traceorder = 'grouped',
                     showlegend = True,
                     geo = dict(
@@ -465,7 +470,10 @@ class Geospatial:
                         landcolor = 'rgb(243, 243, 243)',
                         countrycolor = 'rgb(204, 204, 204)',
                     ),
-                    height = 1000
+                    width = 1000,
+                    height = 400,
+                    legend = dict(yanchor="middle",y=0.5,xanchor="left",x=1.0),
+                    margin= dict(l = 2,r = 2,b = 2,t = 2,pad = 2)
                 )
         
         #display
@@ -511,7 +519,7 @@ class Geospatial:
                             hoverinfo = 'text',
                             text = species_df_coords[encounter_loc_label],  
                             mode = 'markers',
-                            name = species + ' encounter locations ' + str(len(species_df_coords)),
+                            name = species + ' encounter locations ',
                             marker = dict(
                                 size = 3.5,
                                 color = encounter_colors[species]
@@ -519,23 +527,19 @@ class Geospatial:
     
         #add the user country markers 
         if user_locs == True:
-            
-            for species, species_color in encounter_colors.items():
-                #subdataframe that pertains to current species of interest only
-                species_df_coords = df_coords[df_coords['species'] == species]
                 
-                user_country_label = keys[platform][1]
-                fig.add_trace(go.Scattergeo(
-                            lon = species_df_coords['user_long'],
-                            lat = species_df_coords['user_lat'],
-                            hoverinfo = 'text',
-                            text = species_df_coords[user_country_label], 
-                            mode = 'markers',
-                            name = 'user locations (all species)',
-                            marker = dict(
-                                size = 4,
-                                color = 'black'
-                            )))
+            user_country_label = keys[platform][1]
+            fig.add_trace(go.Scattergeo(
+                        lon = df_coords['user_long'],
+                        lat = df_coords['user_lat'],
+                        hoverinfo = 'text',
+                        text = df_coords[user_country_label], 
+                        mode = 'markers',
+                        name = 'user locations (all species)',
+                        marker = dict(
+                            size = 4,
+                            color = 'black'
+                        )))
 
         if user_locs and enc_locs:
             
@@ -563,10 +567,8 @@ class Geospatial:
                     #after adding first species trace, no longer show legend
                     first_species_instance= False
         
-        
         #update parameters of map figure to display
         fig.update_layout(
-                    title_text = 'Flickr Species Sightings Since 06.01.2019',
                     legend_traceorder = 'grouped',
                     showlegend = True,
                     geo = dict(
@@ -576,7 +578,102 @@ class Geospatial:
                         landcolor = 'rgb(243, 243, 243)',
                         countrycolor = 'rgb(204, 204, 204)',
                     ),
-                    height = 1000
+                    width = 1000,
+                    height = 400,
+                    legend = dict(yanchor="middle",y=0.5,xanchor="left",x=1.0),
+                    margin= dict(l = 2,r = 2,b = 2,t = 2,pad = 2)
+                )
+        
+        #display
+        fig.show("notebook")
+        
+    def plotEncounterAndUserLocationsAllSpeciesV4(self, species, df_coords, platform, enc_locs = False, user_locs = False):
+        
+        '''
+            function to visualize encounter and corresponding user locations for posts via map using plotly express
+            Connecting Lines + Color Coded Encounter location coords; User coords --> black dots
+        '''
+        species_colors = {'humpback whale': 'blue', 
+                         'whale shark': 'cyan', 
+                         'iberian lynx': 'purple', 
+                         'reticulated giraffe': 'yellow',
+                         'grevy zebra': 'green', 
+                         'plains zebra': 'coral'}
+        
+        species_color = species_colors[species]
+        
+        #initialize a space for figure
+        fig = go.Figure()
+        
+        #access different platform's text keywords/labels for labeling each dot on the map
+        keys = {'youtube': ['encounter_loc', 'user_country'], 'flickr_june_2019': ['id', 'user_location'], 'iNaturalist': ['enc_lat']}
+        
+        #add the encounter location markers 
+        if enc_locs == True:
+            encounter_loc_label = keys[platform][0]
+            fig.add_trace(go.Scattergeo(
+                        lon = df_coords['enc_long'],
+                        lat = df_coords['enc_lat'],
+                        hoverinfo = 'text',
+                        text = df_coords[encounter_loc_label],  
+                        mode = 'markers',
+                        name = species + ' encounter locations ' + str(len(df_coords)),
+                        marker = dict(
+                            size = 3.5,
+                            color = species_color
+                        )))
+    
+        #add the user country markers 
+        if user_locs == True:
+                
+            user_country_label = keys[platform][1]
+            fig.add_trace(go.Scattergeo(
+                        lon = df_coords['user_long'],
+                        lat = df_coords['user_lat'],
+                        hoverinfo = 'text',
+                        text = df_coords[user_country_label], 
+                        mode = 'markers',
+                        name = 'user locations (all species)',
+                        marker = dict(
+                            size = 4,
+                            color = 'black'
+                        )))
+
+        if user_locs and enc_locs:
+            first_species_instance = True
+            #add traces between species coordinates connecting user loc to enc loc
+            for i in df_coords.index:
+                fig.add_trace(
+                    go.Scattergeo(
+                                lon = [df_coords['user_long'][i], df_coords['enc_long'][i]],
+                                lat = [df_coords['user_lat'][i], df_coords['enc_lat'][i]],
+                                mode = 'lines',
+                                line = dict(width = 1,color = species_color),
+                                visible = True,
+                                name = species +'  '+ str(len(df_coords)),
+                                showlegend = first_species_instance
+                        )
+                    )
+                #after adding first species trace, no longer show legend
+                first_species_instance= False
+                    
+        
+        
+        #update parameters of map figure to display
+        fig.update_layout(
+                    legend_traceorder = 'grouped',
+                    showlegend = True,
+                    geo = dict(
+                        scope = 'world',
+                        projection_type = 'equirectangular', #'azimuthal equal area',
+                        showland = True,
+                        landcolor = 'rgb(243, 243, 243)',
+                        countrycolor = 'rgb(204, 204, 204)',
+                    ),
+                    width = 1000,
+                    height = 400,
+                    legend = dict(yanchor="middle",y=0.5,xanchor="left",x=1.0),
+                    margin= dict(l = 2,r = 2,b = 2,t = 2,pad = 2)
                 )
         
         #display
@@ -601,4 +698,38 @@ class Geospatial:
         plt.title('Differences in Encounter and User Locations for ' + collection + ' Wild Encounters')
         plt.xlabel('Distance(km)')
         plt.ylabel('Frequency')
+        
+        
+    def getAverageDistancePerSpecies(self, df_coords):
+        avg_species_distances_df = pd.DataFrame(columns = ['species', 'avg_distance'])
+        species_list = ['humpback whale', 'whale shark', 'iberian lynx', 'reticulated giraffe', 'grevy zebra', 'plains zebra']
+        
+        for species in species_list:
+            #tuple of df indices where species is the current species key
+            species_idx = np.where(df_coords['species'] == species)[0]
+        
+            #calculate distance difference for each wild encounter
+            distances=[]
+            for idx in species_idx:
+                enc_loc = (df_coords.enc_lat[idx], df_coords.enc_long[idx])
+                user_loc = (df_coords.user_lat[idx], df_coords.user_long[idx])
+                dist= distance.distance(enc_loc, user_loc).km
+                distances.append(dist)
+            
+            if len(distances) != 0:
+                avg_distance = np.sum(np.array(distances)) / len(distances)
+                print(avg_distance)
+            else: 
+                avg_distance = None
+                print('none')
+            
+            #insert new entry into df
+            avg_species_distances_df = avg_species_distances_df.append({'species': species,
+                                              'avg_distance': avg_distance}, ignore_index = True)
+            
+        return avg_species_distances_df         
+            
+            
+            
+            
         
