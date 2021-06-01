@@ -224,6 +224,7 @@ class Database:
                     try:
                         if item['url'] != "":
                             display(Image(item['url'], height=500, width=500))
+                            print('Title: {}\nTags: {}\n(Lat, Long): ({},{})\n'.format(item['title'], item['tags'], item['latitude'], item['longitude']))
                         else: 
                             #handle images w/o urls
                             self.db[collection].remove({'id': item['id']})
