@@ -2,30 +2,19 @@
 from pymongo import MongoClient
 import pprint
 from IPython.display import YouTubeVideo, Image, display, Video
-# from wildbook_social import EmbedTweet
-from datetime import timedelta
-import time
-import dateutil.parser
+
 import matplotlib.pyplot as plt
 import csv
 import pandas as pd 
-import geopandas as gpd
-import descartes
-pd.options.mode.chained_assignment = None  # default='warn'
-from shapely.geometry import Point
-import datetime
-from datetime import date
 import numpy as np
 import itertools
+pd.options.mode.chained_assignment = None  # default='warn'
 
-from geopy.extra.rate_limiter import RateLimiter
-from geopy.geocoders import Bing
-from geopy.geocoders import Nominatim
-from geopy import distance
-import plotly.express as px
-import plotly.graph_objects as go
-
-import seaborn as sns
+import datetime
+from datetime import date
+from datetime import timedelta
+import time
+import dateutil.parser
 
 
 ## class to support database operations done on items in mongoDB
@@ -35,9 +24,9 @@ class Database:
         self.client = MongoClient(key)
         self.dbName = database
         self.db = self.client[database]
-        self.dateStr = '2019-03-01T00:00:00.00Z' 
+        self.dateStr = '2019-03-01T00:00:00.00Z' #timeframe begins March 2019
         self.timeFrameStart = dateutil.parser.parse(self.dateStr)
-        self.timeFrameEnd = dateutil.parser.parse('2020-03-01T00:00:00.00Z')
+        self.timeFrameEnd = dateutil.parser.parse('2020-03-01T00:00:00.00Z') #changed timeframe to end March 2020
         
         
     ## add a new doc to collection
@@ -499,8 +488,6 @@ class Database:
                 wild_count = self.db[collection].count({"wild": True})
                 rel_count = self.db[collection].count({"relevant": True})
                 
-            
-            
             species_wild_counts.append(wild_count)
             species_rel_counts.append(rel_count)
             
