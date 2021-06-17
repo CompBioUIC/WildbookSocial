@@ -16,6 +16,9 @@ from datetime import timedelta
 import time
 import dateutil.parser
 
+import mimetypes, urllib3
+import requests
+
 
 ## class to support database operations done on items in mongoDB
 class Database:
@@ -158,6 +161,13 @@ class Database:
         
         return False
     
+    def is_url_image(self, image_url):
+        image_formats = ("image/png", "image/jpeg", "image/jpg")
+        r = requests.head(image_url)
+        if r.headers["content-type"] in image_formats:
+            return True
+        return False
+    
     ## method to manually filter documents in platform collections
     ## displays image/video to user and asks for relevance and wild/captive classification
     ## method then proceeds to update 'relevant' and 'wild' fields for doc in mongoDB
@@ -208,24 +218,23 @@ class Database:
                 elif self.dbName == 'flickr_june_2019':
                     # try-except handles some documents having the new, updated name 'url' field rather than
                     # the 'url_l' (original, older version) 
-                    #to handle images without available url's: 
-                    #delete the item from our collection and move on to next image (continue)
-                    try:
-                        if item['url'] != "":
-                            display(Image(item['url'], height=500, width=500))
-                            print('Title: {}\nTags: {}\n(Lat, Long): ({},{})\n'.format(item['title'], item['tags'], item['latitude'], item['longitude']))
-                        else: 
-                            #handle images w/o urls
-                            self.db[collection].remove({'id': item['id']})
-                            continue
-                    except KeyError: 
-                        if item['url_l'] != "":
-                            display(Image(item['url_l'], height=200, width=200))
-                        else: 
-                            #handle images w/o urls
-                            self.db[collection].remove({'id': item['id']})
-                            continue
                     
+                    try:
+                        img_url = item['url']
+                    except KeyError:
+                        img_url = item['url_l']
+                    
+                    print(img_url) #just checking url
+                    
+                    if img_url != "" and self.is_url_image(img_url):
+                        display(Image(img_url, height=500, width=500))
+                        print('Title: {}\nTags: {}\n(Lat, Long): ({},{})\n'.format(item['title'], item['tags'], item['latitude'], item['longitude']))
+                        
+                    else:
+                        print('URL no longer valid/working ... Removing Document ... ')
+                        self.db[collection].remove({'id': item['id']})
+                        continue
+                        
 
                 # prompt user for relevance classification
                 print("Relevant (y/n):", end =" ")
