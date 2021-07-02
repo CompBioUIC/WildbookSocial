@@ -221,6 +221,7 @@ class Database:
                     except KeyError: 
                         if item['url_l'] != "":
                             display(Image(item['url_l'], height=200, width=200))
+                            print('Title: {}\nTags: {}\n(Lat, Long): ({},{})\n'.format(item['title'], item['tags'], item['latitude'], item['longitude']))
                         else: 
                             #handle images w/o urls
                             self.db[collection].remove({'id': item['id']})
@@ -265,7 +266,12 @@ class Database:
             amount -= 1
             i += 1
             
-        print('No more items to proceed.')     
+        print('No more items to proceed.')
+        
+        # determine how many images still need to be filtered in the collection
+        filtered_count = self.db[collection].count({"relevant":{"$ne":None}})
+        col_count = self.db[collection].count()
+        print('The number of documents that still need to be manually filtered for collection "{}" is {}.'.format(collection, (col_count-filtered_count)))
       
     ## structures a dictionary containing the number of posts per week within the time frame
     ## as such: {week_0: 2, week_1: 15, week_2: 37 ...} from a list of dates
