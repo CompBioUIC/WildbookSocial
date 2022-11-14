@@ -16,6 +16,11 @@ from datetime import timedelta
 import time
 import dateutil.parser
 
+import geopy
+from geopy.geocoders import Nominatim
+# from geopy.geocoders import Photon
+from geopy.extra.rate_limiter import RateLimiter
+
 import mimetypes, urllib3
 import requests
 
@@ -24,10 +29,10 @@ import requests
 class Database:
     
     def __init__(self, key, database):
-        self.client = MongoClient(key)
-        self.dbName = database
-        self.db = self.client[database]
-        self.dateStr = '2019-03-01T00:00:00.00Z' #timeframe begins March 2019
+        self.client = MongoClient(key) if key is not None else None
+        self.dbName = database if key is not None else None
+        self.db = self.client[database] if key is not None else None
+        self.dateStr = '2019-03-01T00:00:00.00Z' #timeframe begins March 2019 
         self.timeFrameStart = dateutil.parser.parse(self.dateStr)
         self.timeFrameEnd = dateutil.parser.parse('2020-03-01T00:00:00.00Z') #changed timeframe to end March 2020
         
@@ -95,7 +100,7 @@ class Database:
                 field_2 = 'created_on'
             
             #flickr
-            if self.dbName == 'flickr_june_2019':
+            if self.dbName == 'flickr_june_2019' or self.dbName == 'imgs_for_species_classifier':
                 try:
                     date_str = doc['datetaken']
                     field = 'datetaken'
@@ -168,6 +173,122 @@ class Database:
             return True
         return False
     
+    def doubleCheckWildImgs(self, collection):
+        res = self.db[collection].find({"wild": True})
+        wild_count = self.db[collection].count({"wild": True})
+        print("Total Wild: ", wild_count)
+        for item in res:
+            img_url = item['url']
+            display(Image(img_url, height=500, width=500))
+            print('Title: {}\nTags: {}\n(Lat, Long): ({},{})\n'.format(item['title'], item['tags'], item['latitude'], item['longitude']))
+        print('No more wild images to display...\n')
+
+    # used to encode coordinates --> human readable location
+    def coordsToLocation(self, lat, long):
+    
+        #instantiate geocoder
+        locator = Nominatim(user_agent = "myWBGeocoder", timeout = 10) #Nominatim(user_agent = "myGeocoder", timeout = 10)
+        rgeocode = RateLimiter(locator.reverse, min_delay_seconds = 0.001)
+
+        #convert lat long to string
+        coords = str(lat) + "," + str(long)
+
+        #get countries
+        if coords == "0,0" or coords == "0.0,0.0":
+            location = "N/A"
+        else:
+            #apply rgeocode function
+            try:
+                location = rgeocode(coords)
+            except:
+                location = coords
+
+        return location
+    
+    def setFieldDoubleChecked(self, collection):
+        #add a conditional statement to check if double_checked field exists already in documents to avoid resetting
+        self.db[collection].update({}, {"$set": {"double_checked": False}}, upsert=False, multi=True)
+        print('Done updating {} with field double_checked=False'.format(collection))
+    
+    # A safety feature in case relevant prediction turns out not to be true
+    # Retrieves all images in collection that were marked 'relevant' (by MS Classifier) but don't have a value assigned for 'wild'
+    # Outputs image and metadata to help decide if img is truly relevant and wild
+    def doubleCheckRelevantImages(self, collection, amount, first_round = True):
+        
+        initial_amount = amount
+        while(amount > 0):
+            print("Amount: ", amount)
+            
+            if first_round == True:
+                item = self.db[collection].find_one({"$and": [{"relevant": True}, {"wild": None}]})
+            else:
+                item = self.db[collection].find_one({"$and": [{"relevant": True}, {"double_checked": False}]})
+                double_checked = False
+            
+            if not item:
+                break
+                
+            try:
+                img_url = item['url']
+                
+            except KeyError:
+                img_url = item['url_l']
+            
+            if img_url != "" and self.is_url_image(img_url):
+                display(Image(img_url, height=500, width=500))
+                location = self.coordsToLocation(item['latitude'], item['longitude'])
+                print('ID: {}\nTitle: {}\nTags: {}\nLocation: ({},{}) --> {}\n'.format(item['_id'],item['title'], item['tags'], item['latitude'], item['longitude'], location))
+                print('Url:{}\n'.format(img_url))
+                try: 
+                    print('Confidence of Prediction: {}\n'.format(item['confidence']))
+                except KeyError:
+                    pass
+                        
+            else:
+                print('URL no longer valid/working ... Removing Document ... ')
+                self.db[collection].remove({'id': item['id']})
+                continue
+                
+            # prompt user for relevance classification
+            print("CLASSIFIED AS RELEVANT. Is it truly RELEVANT (y/n)?:", end =" ")
+            rel = True if input() == "y" else False
+            
+           
+            if rel == True:
+                wild_response = input("WILD (y-yes/u-unknown/n-no): ")
+
+                #possible values for wild classification: wild, unknown, or not wild
+                if wild_response == 'y':
+                    wild = True
+                elif wild_response == 'u':
+                    wild = 'unknown'
+                else:
+                    wild = False
+            else:
+                wild = 0
+            
+            print('Updating...')
+            if first_round == True:
+                self._updateItem(collection, item['_id'], {"relevant": rel, "wild": wild})
+            else:
+                self._updateItem(collection, item['_id'], {"relevant": rel, "wild": wild, "double_checked": True})
+                double_checked = True
+            
+            if wild == True:
+                print("Response saved! {} and {}.\n".format("Relevant", "Wild", ))
+            elif wild == 'unknown':
+                print("Response saved! {} and {}.\n".format("Relevant","unknown"))
+            else:
+                print("Response saved! {} and {}.\n".format("Relevant" if rel else "Not relevant", "Wild" if wild else "Not wild"))
+            
+            if first_round == False:
+                print('double_checked?: {}\n'.format(double_checked))
+
+            amount -= 1
+        
+        print("Done looking through {} images".format(initial_amount))
+    
+    
     ## method to manually filter documents in platform collections
     ## displays image/video to user and asks for relevance and wild/captive classification
     ## method then proceeds to update 'relevant' and 'wild' fields for doc in mongoDB
@@ -186,13 +307,14 @@ class Database:
             
             #only retrieve videos to filter that meet the time frame of June 1st, 2019 and forward
             if self.dbName == 'youtube':
-                item = self.db[collection].find_one({"$and":[{"relevant": None},\
-                                                             {"publishedAt":{"$gte": self.timeFrameStart}}]})
+#                 item = self.db[collection].find_one({"$and":[{"relevant": None},\
+#                                                              {"publishedAt":{"$gte": self.timeFrameStart}}]})
+                item = self.db[collection].find_one({"relevant": None})
                 if not item:
                     break
                                    
             #flickr - find an unsorted item and check for duplicates
-            elif self.dbName == 'flickr_june_2019':
+            elif self.dbName == 'flickr_june_2019' or self.dbName == 'imgs_for_species_classifier':
                 
                 #get an item that hasn't been manually filtered
                 item = self.db[collection].find_one({'relevant': None})
@@ -215,7 +337,7 @@ class Database:
                     print("{}: {}".format(i, item['title']['original']))
                     display(YouTubeVideo(item['_id']))
 
-                elif self.dbName == 'flickr_june_2019':
+                elif self.dbName == 'flickr_june_2019' or self.dbName == 'imgs_for_species_classifier':
                     # try-except handles some documents having the new, updated name 'url' field rather than
                     # the 'url_l' (original, older version) 
                     
@@ -317,22 +439,32 @@ class Database:
         return self.postsPerWeekDict, numOfPosts
     
     
-    ## Finds postsPerWeek for a given species + platform
-    ## structures a dictionary as such: {week_0: 2, week_1: 15, week_2: 37 ...} from a list of dates
-    ## plots number of posts (y axis) vs week # (x axis)
-    def postsPerWeekSpecies(self, collection): #, YYYY = 2019, MM = 6, DD = 1):
+    def postsPerWeekSpecies(self, collection, print_timeframe = False):
+        
+        """ Finds postsPerWeek for a given species + platform
+
+        Args
+            collection (string): name of mongodb collection to get ppw from
+
+        Outputs
+
+            postsPerWeekDict (dict): counts of posts per week from self.timeFrameStart to self.timeFrameEnd
+                                     example. {week_0: 2, week_1: 15, week_2: 37 ...}
+
+            numOfPosts (int): total number of posts for the collection from self.timeFrameStart to self.timeFrameEnd
+        """
+
         #keys to access each platform's different date/time field
         keys = {'youtube': 'publishedAt', 'twitter': 'created_at', 'iNaturalist': 'time_observed_utc', 'flickr_june_2019': 'datetaken'}
 
         #gather results for youtube or twitter or flickr
         if self.dbName == 'youtube':
-            res = self.db[collection].find({"$and":[{"wild": True},{"publishedAt":{"$gte": self.timeFrameStart}}]})
+            res = self.db[collection].find({"$and":[{"wild": True},{"publishedAt":{"$gte": self.timeFrameStart}}, {"publishedAt":{"$lte": self.timeFrameEnd}}]})
+            # res = self.db[collection].find({"$and":[{"wild": True},{"publishedAt":{"$gte": self.timeFrameStart}}]})
+
         elif self.dbName == 'flickr_june_2019':
             res = self.db[collection].find({"$and":[{"wild": True},{"datetaken":{"$gte": self.timeFrameStart}}]})
-        elif self.dbName == 'twitter':
-            res = self.db[collection].find({"$and":[{"wild": True},{"created_at":{"$gte": self.timeFrameStart}}]})
         else:
-            #gather results for iNaturalist "$ne":0
             res = self.db[collection].find({"$and": [{'captive': False},{'time_observed_utc':{"$gte":self.timeFrameStart}}]})
 
         #create a list of all the times (in original UTC format) in respective fields for each platform    
@@ -342,7 +474,7 @@ class Database:
             return
         
         ## get list of dates of platform's posts and sort
-        if self.dbName == 'youtube' or self.dbName == 'twitter' or self.dbName == 'flickr_june_2019':
+        if self.dbName == 'youtube' or self.dbName == 'flickr_june_2019':
             dates = [x.date() for x in timePosts] 
             dates.sort() 
         else:
@@ -353,6 +485,10 @@ class Database:
                 except TypeError:
                     print('TypeError', type(x), x)
             dates.sort()
+
+        if print_timeframe:
+            print('starting at: ', self.timeFrameStart.date())
+            print('ending at:   ', self.timeFrameEnd.date())
 
         start = self.timeFrameStart.date()
         end = self.timeFrameEnd.date() ##datetime.date.today()
@@ -371,12 +507,17 @@ class Database:
             weekNumber += 1
     
         #make a dictionary self.postsPerWeek
-        #keys are datetime objects of the date to start a new week
-        #values are number of posts that were posted anytime from that date to date + 6 days
-        #format self.postsPerWeekDict = { 06.01.19 : 4, 06.08.19 : 5, 06.15.19 : 1 ... }
-        for key,value in dictWeekNumbers.items():
+        #keys:   datetime objects of the date to start a new week
+        #values: number of posts that were posted anytime from that date to date + 6 days
+        #ex. self.postsPerWeekDict = { 06.01.19 : 4, 06.08.19 : 5, 06.15.19 : 1 ... }
+        for key, value in dictWeekNumbers.items():
             current_week = value
             next_week = current_week + datetime.timedelta(days = 7)
+
+            #to avoid overcounting at end
+            if next_week > self.timeFrameEnd.date():
+                next_week = self.timeFrameEnd.date()
+
             for date in dates:
                 if (date >= current_week) and (date < next_week):
                     count += 1
@@ -392,7 +533,7 @@ class Database:
     def movingAveragePosts(self,window):
         #create a list of just the counts of posts for each week 
         postsPerWeekList = [item for item in self.postsPerWeekDict.values()] #FIXME: CHECK ORDER DUE TO DICTIONARY 
-        #print('calculating simple moving average...\n')
+        
         #calculating moving average with data points in postsPerWeekList
         weights = np.repeat(1.0, window)/window
         self.smas = np.convolve(postsPerWeekList, weights, 'valid') #calculate simple moving averages (smas)
@@ -402,9 +543,10 @@ class Database:
     # Finds postsPerWeek for a given species + platform
     def movingAveragePostsSpecies(self,collection, window):
         postsPerWeekDict, numOfPosts = self.postsPerWeekSpecies(collection)
+        
         #create a list of just the counts of posts for each week 
         postsPerWeekList = [item for item in postsPerWeekDict.values()] #FIXME: CHECK ORDER DUE TO DICTIONARY 
-        #print('calculating simple moving average...\n')
+
         #calculating moving average with data points in postsPerWeekList
         weights = np.repeat(1.0, window)/window
         smas = np.convolve(postsPerWeekList, weights, 'valid') #calculate simple moving averages (smas)
@@ -483,8 +625,8 @@ class Database:
     def getWildCountsAllSpecies(self, nameOfDb):
         species_cols = {'youtube': ["humpback whales", "new whale sharks test", "iberian lynx", "Reticulated Giraffe", \
                                     "grevys zebra", "plains zebras"],
-                        'flickr': ['humpback whale specific', 'whale shark specific','iberian lynx general multilingual', \
-                                  'reticulated giraffe specific', 'grevy zebra general',\
+                        'flickr': ['humpback whale specific', 'whale shark specific','iberian lynx general', \
+                                  'reticulated giraffe general', 'grevy zebra general',\
                                   'plains zebra specific'],
                         'iNaturalist': ["humpback whales", "whale sharks", "iberian lynx", "reticulated giraffe",\
                                      "grevy's zebra", "plains zebra"]
@@ -499,8 +641,13 @@ class Database:
                 rel_count = wild_count
                 
             else:
-                wild_count = self.db[collection].count({"wild": True})
                 rel_count = self.db[collection].count({"relevant": True})
+                
+                #there is some weird notation --> need to check why not all relevant videos aren't also wild... 10-7-21
+                if collection == 'humpback whale specific':
+                    wild_count = rel_count
+                else:
+                    wild_count = self.db[collection].count({"wild": True})
                 
             species_wild_counts.append(wild_count)
             species_rel_counts.append(rel_count)

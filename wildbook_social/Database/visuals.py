@@ -9,6 +9,7 @@ from numpy import insert
 import numpy as np
 import re
 
+from tabulate import tabulate
 
 
 ## class containing functions that visualize analytics across data gathered via social media platforms
@@ -57,55 +58,97 @@ class Visualize:
         df["time_delay_days"] = time_delay_days
         
         #plot date observed vs date uploaded in scatterplot
-        fig, ax = plt.subplots(figsize=(14,14))
+        fig, ax = plt.subplots(figsize=(7,7))
         sns.scatterplot(data=df, x="observed_on", y="created_on", hue="time_delay_days", palette='nipy_spectral', ax=ax)
         
         #plot a complementary histogram to visualize COUNTS
         delays = df['time_delay_days']
-        plt.figure(figsize=(14,14))
+        plt.figure(figsize=(7,7))
         sns.histplot(data=df, x='time_delay_days')
 
         return df  
 
     
     ## function to print out info regarding volume of relevant/irrelevant posts
-    def showNumDocsRelevant(self, collection):
+    def showNumDocsRelevant(self, collection, display_table = True):
         
-        ## get total number of docs filtered through in collection
-        total = self.db[collection].count_documents({ "$and": [{"relevant":{"$in":[True,False]}}]})
-        if total == 0:
-            print("No videos were processed yet.")
-            return
+        wild_geotagged_count = 0
+        wild_geotagged_percent = 0
+
+        if self.dbName == 'iNaturalist':
+            ## total number of relevant documents in iNaturalist collection
+            total = self.db[collection].count_documents({})
+
+            ## all docs collected from iNat are relevant, so this number should be the same as `total`
+            relevant_count = self.db[collection].count_documents({})
+            relevant_percent = relevant_count / total * 100
+
+            wild_count = self.db[collection].count_documents({"captive": False})
+            wild_percent = wild_count / total * 100
+
+            wild_geotagged_count = self.db[collection].count_documents({"$and":[{"captive": False},{"latitude": {"$ne": None}}]})
+            wild_geotagged_percent = wild_geotagged_count / total * 100
+
+            captive_count = self.db[collection].count_documents({"captive": True})
+            captive_percent = captive_count / total * 100
+
+            unknown_count = self.db[collection].count_documents({"captive": "unknown"}) #should be 0 bc iNat should not have unknown labels, but we keep for consistency
+            unknown_percent = unknown_count / total * 100
+
+            if display_table == True:
+                data = [['raw count', total, relevant_count, wild_count, captive_count, unknown_count, wild_geotagged_count],
+                        ['percent (out of total)', 100, "{:0.2f}".format(relevant_percent), "{:0.2f}".format(wild_percent), "{:0.2f}".format(captive_percent), "{:0.2f}".format(unknown_percent), "{:0.2f}".format(wild_geotagged_percent)]]
+
+                print(tabulate(data, headers=[" ", "Total (Relevant + Irrelevant)", "Relevant", "Wild", "Captive", "Unknown", "Wild and Geotagged"]))
+                print("\n")
+            
         
-        ## number of docs marked as relevant stored in our collection
-        relevant_count = self.db[collection].count_documents({ "$and": [{"relevant":True}]})
-        print("relevant: {} \n".format(relevant_count))
+        else:
+            ## get total number of docs filtered through in collection
+            total = self.db[collection].count_documents({ "$and": [{"relevant":{"$in":[True,False]}}]})
+            if total == 0:
+                print("No videos were processed yet.")
+                return
         
-        ## percent relevant caluclated out of total
-        relevant = self.db[collection].count_documents({ "$and": [{"relevant":True}]}) / total * 100 
+            ## number of docs marked as relevant stored in our collection
+            relevant_count = self.db[collection].count_documents({ "$and": [{"relevant":True}]})
+            relevant_percent = relevant_count / total * 100
+
+            wild_count = self.db[collection].count_documents({ "$and": [{"relevant":{"$in":[True]}}, {"wild":True}]})
+            wild_percent =  wild_count / total * 100 
+
+            if self.dbName == "flickr_june_2019":
+                wild_geotagged_count = self.db[collection].count_documents({"$and":[{"relevant": True},{"wild": True},{"latitude": {"$ne": 0}}]})
+                wild_geotagged_percent = wild_geotagged_count / total * 100
+
+            captive_count = self.db[collection].count_documents({ "$and": [{"relevant":{"$in":[True]}}, {"wild":False}]})
+            captive_percent =  captive_count / total * 100 
+
+            unknown_count = self.db[collection].count_documents({ "$and": [{"relevant":{"$in":[True]}}, {"wild": "unknown"}]})
+            unknown_percent =  unknown_count / total * 100      
+            
+            if display_table == True:
+                data = [['raw count', total, relevant_count, wild_count, captive_count, unknown_count, wild_geotagged_count],
+                        ['percent (out of total)', 100, "{:0.2f}".format(relevant_percent), "{:0.2f}".format(wild_percent), 
+                        "{:0.2f}".format(captive_percent), "{:0.2f}".format(unknown_percent), "{:0.2f}".format(wild_geotagged_percent)]]
+
+                print(tabulate(data, headers=[" ", "Total (Relevant + Irrelevant)", "Relevant", "Wild", "Captive", "Unknown", "Wild and Geotagged"]))
+                print("\n")
+
         
-        ## percent wild calculated out of ONLY relevant items, this way the remaining percent can be
-        ## assumed to be % of zoo sightings
-        try:
-            wild = self.db[collection].count_documents({ "$and": [{"relevant":{"$in":[True]}}, {"wild":True}] }) / relevant_count * 100
-            # percent wild calculated out of total
-            wild_tot = self.db[collection].count_documents({ "$and": [{"relevant":{"$in":[True]}}, {"wild":True}] }) / total * 100
-            print(" Out of {} items, {}% are relevant.From those that are relevant, {}% are wild. Out of the total, {}% are wild ".format(total, round(relevant,1), round(wild,1), round(wild_tot, 1)))
-        
-        except ZeroDivisionError:
-            print("No wild documents in collection so far")
+        return total, relevant_count, wild_count, captive_count, unknown_count, wild_geotagged_count
     
     
     ## function handling building the histogram to display time delay between successive posts
     ## only posts within the time frame are considered
-    def showSuccessivePostsDelay(self, collection):
+    def showSuccessivePostsDelay(self, collection, plot_size, plot_style, title= 'Histogram for Time Between Succesive Wild Posts'):
         
         ## time of encounter keywords across different platforms
         keys = {'youtube': 'publishedAt', 'twitter': 'created_at', 'iNaturalist': 'time_observed_utc', 
-                'flickr_june_2019': 'datetaken'}
+                'flickr_june_2019': 'datetaken', 'imgs_for_species_classifier': 'datetaken'}
 
         ## gather wild encounter docs. If statement handles youtube, twitter, flickr; else statement handles iNat results
-        if self.dbName == 'youtube' or self.dbName == 'twitter' or self.dbName == 'flickr_june_2019':
+        if self.dbName == 'youtube' or self.dbName == 'twitter' or self.dbName == 'flickr_june_2019' or self.dbName == 'imgs_for_species_classifier':
             res = self.db[collection].find({"$and": [{"wild": True},{keys[self.dbName]:{"$gte": self.timeFrameStart}}]})
         else:
             res = self.db[collection].find({"$and": [{'captive': False},{'time_observed_utc': {"$gte":self.timeFrameStart}}]})
@@ -131,11 +174,13 @@ class Visualize:
             lastDate.append(date)
 
         #plot the time delays using seaborn histogram
-        plt.figure(figsize=(20,20))
+        # plt.figure(figsize=(7,7))
+        sns.set(rc={'figure.figsize':plot_size})
+        sns.set_style(plot_style)
         sns.histplot(data=timeDiffs, bins=10)
         plt.xlabel('Days between succesive posts')
         plt.ylabel('Number of posts')
-        plt.title('Histogram for Time Between Succesive Wild Posts')
+        plt.title(title)
 
         return self.dates
     
@@ -154,7 +199,7 @@ class Visualize:
         smas = insert(smas, 0,0)
         
         #plot posts per week and average posts per week
-        fig, plt_ppw = plt.subplots(1,1,figsize=(10,10))    
+        fig, plt_ppw = plt.subplots(1,1,figsize=(7,7))    
         plt_ppw.plot(ppw_keys, ppw_values, label="no moving avg filter")
         plt_ppw.plot(ppw_keys, smas, label="moving avg filter applied")
         plt_ppw.set_title("Posts Per Week for wild encounters in {} collection".format(collection))

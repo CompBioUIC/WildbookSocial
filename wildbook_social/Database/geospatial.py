@@ -22,7 +22,45 @@ class Geospatial:
     def __init__(self, db_obj):
         self.db = db_obj
     
-     
+    def location_name_to_coordinates(self, location_names):
+        
+        '''
+        converts a location name (ex. Alaska) to its latitude and longitude coordinates
+        ------------------------------------------------------------------------------
+        Input:    
+                location_names: list of location names
+        Returns:  
+                lat_long_coords: list of latitude, longitude coordinates --> [(lat, long), ...]
+        
+        '''
+        
+        #use bing geocoder to convert cities/countries -> lat, long coords
+        key = 'AsmRvBYNWJVq55NBqUwpWj5Zo6vRv9N_g6r96K2hu8FLk5ob1uaXJddVZPpMasio'
+        locator = Bing(key)
+        
+        #get lat long coords for location 
+        lat_long_coords = []
+        for location in location_names:
+
+            
+            #handle case where no location is available
+            if(location == '') or (location is None):
+                coords = (None, None)
+            
+            try:
+                lat = locator.geocode(location, timeout = 3).latitude
+                long = locator.geocode(location, timeout = 3).longitude
+                
+                coords = (lat, long)
+            
+            except :
+                coords = (None, None)
+            
+            lat_long_coords.append(coords)
+                                                  
+        return lat_long_coords
+        
+        
     def heatmap(self,collection, csvName):
         '''customized to youtube only so far: generates a csv with videoID and location of encounter 
            for all wild encounters
@@ -168,11 +206,14 @@ class Geospatial:
            
         # add the encounter locations to our user info dictionaries
         # which already contain user location
+        i = 0
         for dic in user_info:
             doc_res = self.db[wild_collection].find({'id': dic['id']})
             for doc in doc_res:
                 dic['enc_lat'] = doc['latitude']
                 dic['enc_long'] = doc['longitude']
+            i += 1
+        print(i)
         
         #create a df from our user_info list of dictionaries
         df = pd.DataFrame(user_info)
@@ -208,6 +249,144 @@ class Geospatial:
         return df_both_locs 
     
     
+    def plotLocationCoordinates(self, latitudes, longitudes, title, color, colormap=False):
+        
+        '''
+            function to plot geocoordinates onto a map
+            ------------------------------------------
+            Input: 
+                latitudes: list of latitude coordinates
+                longitudes: list longitude coordinates
+                
+            Output:
+               geographical dot map of latitude, longitudes
+            
+        '''
+        
+        #initialize a space for figure
+        fig = go.Figure()
+        
+        
+        #add the location markers 
+        
+        fig.add_trace(go.Scattergeo(
+                    lon = longitudes,
+                    lat = latitudes, 
+                    hoverinfo = 'text',
+                    mode = 'markers',
+                    name = 'Encounter Location Coordinates',
+                    marker = dict(
+                        size = 4,
+                        color = color
+                    )))
+        
+        
+        #update parameters of map figure to display
+        fig.update_layout(
+                    legend_traceorder = 'grouped',
+                    showlegend = True,
+                    geo = dict(
+                        scope = 'world',
+                        projection_type = "natural earth" , #'equirectangular', #'azimuthal equal area',
+                        showland = True,
+                        landcolor = 'rgb(243, 243, 243)',
+                        countrycolor = 'rgb(204, 204, 204)'
+                    ),
+                    width = 1000,
+                    height = 500,
+                    legend = dict(yanchor="middle",y=0.5,xanchor="left",x=1.0),
+                    margin= dict(l = 2,r = 2,b = 2,t = 2,pad = 2)
+                )
+        
+        #display
+        fig.show("notebook")
+        #fig.show("browser")
+
+        return fig
+    
+
+    def plotRadialMap(self, df):
+        '''
+            plots a connecting line between each encounter location and user location
+        '''
+        
+        #initialize a space for figure
+        fig = go.Figure()
+
+        df = df[(df['encounter_latitude'].notnull() & df['user_latitude'].notnull())]
+        df = df.reset_index(drop=True)
+                
+       #add the encounter location markers (red)
+        fig.add_trace(go.Scattergeo(
+                    lon = df['encounter_longitude'],
+                    lat = df['encounter_latitude'],
+                    hoverinfo = 'text',
+                    mode = 'markers',
+                    name = 'encounter location',
+                    marker = dict(
+                        size = 4,
+                        color = '#a34646',
+                        line = dict(
+                            width = 1,
+                            color = '#a34646' #'rgba(68, 68, 68, 0)'
+                        )
+                    )))
+
+    
+    
+        #add the user country markers (navy)
+        fig.add_trace(go.Scattergeo(
+                    lon = df['user_longitude'],
+                    lat = df['user_latitude'],
+                    hoverinfo = 'text',
+                    mode = 'markers',
+                    name = 'user location',
+                    marker = dict(
+                        size = 4,
+                        color = '#34495e',
+                        line = dict(
+                            width = 1,
+                            color = '#34495e'
+                        )
+                    )))
+
+        #add path traces (blue) from user country to encounter locations, if both features are available
+        for i in range(len(df)):
+            fig.add_trace(
+                        go.Scattergeo(
+                            lon = [df['user_longitude'][i], df['encounter_longitude'][i]],
+                            lat = [df['user_latitude'][i], df['encounter_latitude'][i]],
+                            mode = 'lines',
+                            line = dict(width = 0.8, color='#ab2c44')
+                            # opacity = float(df['num_encounters_at_coords'][i]) / float(df['num_encounters_at_coords'].max()),
+                        )
+                    )
+                            
+        
+        #update parameters of map figure to display
+        landcolor = '#d4cfcd' #'#ede7e4' #'#d4d5d6'
+        fig.update_layout(
+                    showlegend = True,
+                    geo = dict(
+                        scope = 'world',
+                        projection_type = 'equirectangular', #'azimuthal equal area',
+                        showland = True,
+                        landcolor = landcolor,
+                        countrycolor = landcolor,
+                    ),
+                    width = 1000,
+                    height = 500,
+                    # legend = dict(yanchor="middle",y=0.5,xanchor="left",x=1.0),
+                    margin= dict(l = 1,r = 1,b = 1,t = 1,pad = 1)
+                )
+
+        #display
+        fig.show("notebook")
+
+
+
+
+    
     def plotEncounterAndUserLocations(self, collection, df_coords, platform, enc_locs = False, user_locs = False):
         '''
             function to visualize encounter and corresponding user locations for posts via map using plotly express
@@ -228,9 +407,10 @@ class Geospatial:
                         hoverinfo = 'text',
                         text = df_coords[encounter_loc_label], #df_coords['encounter_loc'], 
                         mode = 'markers',
+                        name = 'encounter location',
                         marker = dict(
                             size = 4,
-                            color = 'rgb(255, 0, 0)',
+                            color = 'blue',
                             line = dict(
                                 width = 3,
                                 color = 'rgba(68, 68, 68, 0)'
@@ -248,9 +428,10 @@ class Geospatial:
                         hoverinfo = 'text',
                         text = df_coords[user_country_label], 
                         mode = 'markers',
+                        name = 'user location',
                         marker = dict(
                             size = 4,
-                            color = 'rgb(0, 255, 0)',
+                            color = 'magenta',
                             line = dict(
                                 width = 3,
                                 color = 'rgba(65, 65, 65, 0)'
@@ -265,7 +446,7 @@ class Geospatial:
                                 lon = [df_coords['user_long'][i], df_coords['enc_long'][i]],
                                 lat = [df_coords['user_lat'][i], df_coords['enc_lat'][i]],
                                 mode = 'lines',
-                                line = dict(width = 1,color = 'blue')#,
+                                line = dict(width = 1,color = 'black')#,
                             )
                         )
                             
