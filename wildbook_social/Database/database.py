@@ -463,12 +463,16 @@ class Database:
             # res = self.db[collection].find({"$and":[{"wild": True},{"publishedAt":{"$gte": self.timeFrameStart}}]})
 
         elif self.dbName == 'flickr_june_2019':
+            print('Flickr DB')
             res = self.db[collection].find({"$and":[{"wild": True},{"datetaken":{"$gte": self.timeFrameStart}}]})
         else:
             res = self.db[collection].find({"$and": [{'captive': False},{'time_observed_utc':{"$gte":self.timeFrameStart}}]})
 
         #create a list of all the times (in original UTC format) in respective fields for each platform    
         timePosts = [x[keys[self.dbName]] for x in res]
+        print('collection:', collection)
+        print('timeposts:', len(timePosts))
+        
         if len(timePosts) < 1:
             print("No videos were processed yet.")
             return

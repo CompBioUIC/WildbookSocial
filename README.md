@@ -1,66 +1,13 @@
-# ReadMe.md
+# Using Social Media APIs to collect and understand data for wildlife monitoring applications.
 
-Contents:
----------
+This repository contains a set of python files and jupyter notebooks connecting to YouTube, Flickr, and iNaturalist APIs to collect wildlife encounter data. 
 
-1. backup_data(old): folder with outdated csv files + other data previously used to generate figures. Has now been outdated since this data does not contain information on ALL  filtered data
+## Contents
 
-2. flickr_unique_urls: folder with csv files used to create dataframes consisting of unique urls across all collections per species. These csv files were used to cross-check overlapping documents (ex. same image stored in multiple species collections) and make sure relevant/wild status was consistent across collections. (These files were previously in the same directory as the jupyter notebooks that use them (species_flickr...py), so may have to adjust code accordingly to use them again if needed)
+1. **wildbook_social** folder: contains python scripts to connect to social media platform APIs. Each platform gets its own folder with a nested script inside that does the actual connecting to the API. Data is retrieved from API and formatted before being stored in its respective MongoDB database/collection. The **Database** folder contains scripts used for formatting/updating and visualizing data from MongoDB. The **Geolocations** folder contains a script that is used to help handle coordinate data during visualization. The **SpeciesClassifier** folder contains code previously used to configure Microsoft's Species Classification repository and assign relevant statuses to large amounts of pictures where manual annotation was cumbersome. The SpeciesClassifier no longer functions, so as of Dec 1 2022, these files are no longer relevant to our use. 
 
-3. flickr_user_and_encounter_locations: folder with species coordinate csv files. Each csv file will contain any/all user and/or encounter location information we can find for RELEVANT encounters (wild status can vary, but docs must be relevant). These files will be used to generate encounter/user distribution maps based on geographical information available.
-	3a. inside this folder, theres another folder mongo_db_relevant_docs_data, which contains CSV files of all relevant documents in our mongodb species collections. Each csv has fields directly gathered from our mongodb attributes: 
-	0. relevant
-	1.url, 
-	2. title, 
-	3. latitude (of encounter), 
-	4. longitude (also of encounter), 
-	5. wild, 
-	6. datetaken, 
-	7. owner, and 
-	8. ownername. 
-	12. confidence (MS classifier prediction) - note: some entries/collections may not have this field available if MS classifier was not used 
-	
-	For creating csvs from mongodb purposes: query:'
-	Select fields in order:
-    	1) datetaken
-    	2) latitude
-    	3) longitude
-    	4) owner
-    	5) ownername
-    	6) relevant
-    	7) title
-    	8) url
-    	9) wild
-    	10) confidence (can use excel to add empty column for consistency when merging all species collection csvs into one pooled csv per species)
-	
-	Select CSV as export file type, and after navigating to appropriate directory (mongo_db_relevant_docs_data), rename the file to the format:
-	species_collection_name_relevant_images.csv
-    	
-	Added into merged/pooled csv of data from all the species' collections
-    	11) user latitude
-    	12) user longitude
-    	
-    	13) residing collection
-	
-	
-	- These csv files will be merged by same species to create an overall spreadsheet of all UNIQUE (no duplicates) relevant images pooled together by species with encounter and user lat/long coordinates/locations (if available) and stored in pooled_coordinate_csvs. The maps folder contains figures plotting user, encounter, and any connections between them on a geographic map. There should be a total of six spreadsheets (one per species) in the flickr_user_and_encounter_locations/mongo_db_relevant_docs/pooled_coordinate_csvs folder directory. Each spreadsheet will have all attributes 1-8 noted above (may have missing entries), as well as additional attributes (9) residing collections (collection url can be found in mongodb), (10) user latitude, (11) user longitude)
+2. **notebooks** folder: contains jupyter notebooks that connect to and query social media platform APIs. Flickr and YouTube notebooks also contain sections for the user to manually annotate images and assign relevant and captivity statuses. The **species_classifier** subfolder contains notebooks that previously ran the Microsoft species classifier to accelerate manual annotation. 
 
-4. Jupyter Notebooks: 
+3. **analysis** folder: contains jupyter notebooks that perform data analysis on data collected from social media APIs and understand any underlying biases. Currently a work in progress to organize and format figures neatly. 
 
-
-### Flickr: 
-- <Species_Name>_FlickrClassifierPlayground.ipynb: these notebooks contain data cleaning operations, as well as code that was used to integrate the MS classifier for relevance classification assistance. They also contain the code for cross-checking rel/wild labels across the species' collections.
-
-- FlickrPlayground.ipynb: contains the first iteration of analytics completed for a partial subset of our flickr data. These are now outdated and need to be rerun with newly finished filtered data (as of Jan 24, 2022). Will keep using this file to generate analytics figures for flickr species collections (combined and individually)
-
-- FlickrPlayground-HumpbackWhaleSpecificClassifierLocations.ipynb: a test notebook for gathering info on test documents run through the MS classifier. Contains some geospatial information
-
-- FlickrClassifierPlayground.ipynb: Testing File for the Implementation of MS Classifier with Flickr Data to help speed up classification for ground truths (after integration into species specific classifier playgrounds, this file is no longer useful, but will keep for reference)
-
-### iNaturalist
-
-- iNaturalist.ipynb: one-stop for all analytics, data collection + data filtration from iNaturalist
-
-### YouTube
-
-- YouTube.ipynb: one-stop for all analytics, data collection + data filtration from YouTube
+4. **csv, figures, and json** folders: self explanatory. Contain files/figures for analysis.  
